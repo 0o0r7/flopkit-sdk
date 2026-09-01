@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 
 from flopkit.identity import (
     did_to_public_key,
@@ -25,6 +26,14 @@ def test_identity_roundtrip(tmp_path: Path) -> None:
     sig = sign_bytes(loaded, b"hello")
     assert verify_signature(did, b"hello", sig)
     assert not verify_signature(did, b"bad", sig)
+
+
+def test_existing_identity_path_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "identity.pem"
+    path.write_text("existing")
+    with pytest.raises(FileExistsError):
+        generate_identity("secret", path)
+    assert path.read_text() == "existing"
 
 
 def test_wrong_passphrase(tmp_path: Path) -> None:

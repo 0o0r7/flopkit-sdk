@@ -7,6 +7,12 @@ dist/
 build/
 *.dist
 
+# Sensitive credentials and key material
+*.pem
+*.seed
+.env
+*.jsonl
+
 # Environment variables
 .env
 .env.local

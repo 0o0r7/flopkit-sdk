@@ -1,0 +1,28 @@
+name: sdk-ci
+
+on:
+  push:
+    paths:
+      - "sdk/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "sdk/**"
+      - ".github/workflows/ci.yml"
+
+defaults:
+  run:
+    working-directory: sdk
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check .
+      - run: mypy .
+      - run: pytest --cov --cov-fail-under=90

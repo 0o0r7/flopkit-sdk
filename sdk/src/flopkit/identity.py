@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
@@ -16,10 +17,14 @@ def generate_identity(
 ) -> tuple[Ed25519PrivateKey, str]:
     if not passphrase:
         raise ValueError("passphrase must not be empty")
+    target = Path(path)
+    if target.exists():
+        raise FileExistsError(path)
     key = Ed25519PrivateKey.generate()
     encrypted = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                   serialization.BestAvailableEncryption(passphrase.encode()))
-    Path(path).write_bytes(encrypted)
+    target.write_bytes(encrypted)
+    os.chmod(target, 0o600)
     return key, public_key_to_did(key.public_key())
 
 
