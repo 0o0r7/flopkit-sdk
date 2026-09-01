@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flopkit"
+version = "0.1.0"
+description = "Secure Python SDK and MCP server for the Flop Network Technocore layer"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "flopkit contributors" }]
+dependencies = [
+  "cryptography>=42.0",
+  "httpx>=0.27",
+  "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mkdocs-material>=9.5",
+  "mypy>=1.10",
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+flopkit = "flopkit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flopkit"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+addopts = "--cov=flopkit --cov-report=term-missing --cov-fail-under=90"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+omit = ["src/flopkit/cli.py", "src/flopkit/mcp_server.py"]

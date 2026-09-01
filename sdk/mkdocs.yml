@@ -1,0 +1,10 @@
+site_name: flopkit
+site_description: Secure Technocore SDK and MCP server
+repo_url: https://github.com/flop-network/flopkit
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Security: security.md
+  - MCP setup: mcp.md
