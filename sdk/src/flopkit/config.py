@@ -1,3 +1,5 @@
+"""Centralized, environment-overridable Technocore endpoint configuration."""
+
 from __future__ import annotations
 
 import os
@@ -6,6 +8,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class TechnocoreConfig:
+    """Runtime settings for the experimental GET-based Technocore API."""
+
     base_url: str = os.getenv("FLOPKIT_BASE_URL", "http://127.0.0.1:8000")
     publish_path: str = os.getenv("FLOPKIT_PUBLISH_PATH", "/publish")
     check_in_path: str = os.getenv("FLOPKIT_CHECK_IN_PATH", "/check-in")

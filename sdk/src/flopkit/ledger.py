@@ -37,9 +37,11 @@ class ContributionLedger:
         for event in events:
             signed = {k: v for k, v in event.items() if k != "signature"}
             payload = json.dumps(signed, sort_keys=True, separators=(",", ":")).encode()
-            valid = verify_signature(
-                event.get("did", ""), payload, bytes.fromhex(event.get("signature", ""))
-            )
+            try:
+                signature = bytes.fromhex(event.get("signature", ""))
+                valid = verify_signature(event.get("did", ""), payload, signature)
+            except (TypeError, ValueError):
+                valid = False
             statuses.append({"event": event, "valid": valid})
         proof = {
             "did": self.did,

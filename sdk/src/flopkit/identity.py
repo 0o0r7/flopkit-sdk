@@ -12,11 +12,18 @@ DID_PREFIX = "did:key:z"
 PathLike = str | Path
 
 
+def _reject_seed_phrase(value: str) -> None:
+    lowered = value.lower()
+    if "seed phrase" in lowered or "mnemonic" in lowered or len(value.split()) >= 12:
+        raise ValueError("wallet seed phrases are not accepted")
+
+
 def generate_identity(
     passphrase: str, path: PathLike = "identity.pem"
 ) -> tuple[Ed25519PrivateKey, str]:
     if not passphrase:
         raise ValueError("passphrase must not be empty")
+    _reject_seed_phrase(passphrase)
     target = Path(path)
     if target.exists():
         raise FileExistsError(path)
