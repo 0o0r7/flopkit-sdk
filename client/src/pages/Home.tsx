@@ -52,7 +52,7 @@ export default function Home() {
           <a href="#security" onClick={closeMenu}>Security</a>
           <a href="#mcp" onClick={closeMenu}>MCP server</a>
           <a href="#quickstart" onClick={closeMenu}>Quickstart</a>
-          <a className="nav-github" href="https://github.com/flop-network/flopkit" target="_blank" rel="noreferrer" onClick={closeMenu}>
+          <a className="nav-github" href="https://github.com/0o0r7/flopkit-sdk" target="_blank" rel="noreferrer" onClick={closeMenu}>
             <Github size={16} /> GitHub <ArrowUpRight size={14} />
           </a>
         </nav>
@@ -123,13 +123,13 @@ export default function Home() {
         <section className="quickstart section-frame" id="quickstart">
           <div className="quickstart-rule" />
           <div className="section-kicker"><span>04</span><span>THE FIRST TWO MINUTES</span></div>
-          <div className="quickstart-grid"><div><h2>Install it.<br /><em>Then make a mark.</em></h2><p className="section-lede">The package is small on purpose. Drop it into a clean Python 3.12 environment and move from zero to a signed identity in two commands.</p><div className="quickstart-links"><a className="button button-primary" href="https://github.com/flop-network/flopkit" target="_blank" rel="noreferrer">View on GitHub <Github size={16} /></a><span>MIT licensed · Python 3.12+</span></div></div><div className="quickstart-terminal"><div className="terminal-top"><span className="terminal-dots"><i /><i /><i /></span><span>terminal</span><span className="terminal-status">LIVE</span></div><div className="terminal-body"><p><span className="prompt">$</span> python -m venv .venv</p><p><span className="prompt">$</span> . .venv/bin/activate</p><p><span className="prompt">$</span> pip install -e '.[dev]'</p><p className="terminal-gap"><span className="prompt">$</span> flopkit generate-identity</p><p className="terminal-output">Passphrase: ••••••••••••<br />did:key:z6MkhaXg...<br /><span className="success">identity ready ✓</span></p></div></div></div>
+          <div className="quickstart-grid"><div><h2>Install it.<br /><em>Then make a mark.</em></h2><p className="section-lede">The package is small on purpose. Drop it into a clean Python 3.12 environment and move from zero to a signed identity in two commands.</p><div className="quickstart-links"><a className="button button-primary" href="https://github.com/0o0r7/flopkit-sdk" target="_blank" rel="noreferrer">View on GitHub <Github size={16} /></a><span>MIT licensed · Python 3.12+</span></div></div><div className="quickstart-terminal"><div className="terminal-top"><span className="terminal-dots"><i /><i /><i /></span><span>terminal</span><span className="terminal-status">LIVE</span></div><div className="terminal-body"><p><span className="prompt">$</span> python -m venv .venv</p><p><span className="prompt">$</span> . .venv/bin/activate</p><p><span className="prompt">$</span> pip install -e '.[dev]'</p><p className="terminal-gap"><span className="prompt">$</span> flopkit generate-identity</p><p className="terminal-output">Passphrase: ••••••••••••<br />did:key:z6MkhaXg...<br /><span className="success">identity ready ✓</span></p></div></div></div>
         </section>
 
         <section className="closing section-frame"><div className="closing-mark"><img src={markImage} alt="" /></div><p className="closing-kicker">A small toolkit for a more accountable network.</p><h2>Make your next contribution <em>checkable.</em></h2><a className="button button-dark" href="#quickstart">Build with flopkit <ArrowUpRight size={16} /></a></section>
       </main>
 
-      <footer className="site-footer"><div className="section-frame footer-inner"><div className="brand footer-brand"><img src={markImage} alt="" /><span>flopkit</span></div><p>Secure identity and proof for Technocore.</p><div className="footer-links"><a href="https://github.com/flop-network/flopkit" target="_blank" rel="noreferrer">GitHub <ArrowUpRight size={13} /></a><a href="#security">Security</a><a href="#quickstart">Quickstart</a></div><span className="footer-copy">© 2026 flopkit contributors · MIT</span></div></footer>
+      <footer className="site-footer"><div className="section-frame footer-inner"><div className="brand footer-brand"><img src={markImage} alt="" /><span>flopkit</span></div><p>Secure identity and proof for Technocore.</p><div className="footer-links"><a href="https://github.com/0o0r7/flopkit-sdk" target="_blank" rel="noreferrer">GitHub <ArrowUpRight size={13} /></a><a href="#security">Security</a><a href="#quickstart">Quickstart</a></div><span className="footer-copy">© 2026 flopkit contributors · MIT</span></div></footer>
     </div>
   );
 }
