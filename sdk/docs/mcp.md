@@ -1,27 +1,51 @@
 # MCP setup
 
-Run the local server with an encrypted identity and passphrase supplied through the process environment:
+The MCP server is an optional layer. A user who only needs the Python SDK and CLI should install the core package with `python -m pip install -e .`; MCP dependencies are not included in that installation.
+
+## Install MCP support
+
+From the `sdk` directory, create or reuse an isolated environment and install the MCP extra:
 
 ```bash
-FLOPKIT_IDENTITY=identity.pem FLOPKIT_PASSPHRASE='set-outside-source-control' python -m flopkit.mcp_server
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -e '.[mcp]'
 ```
 
-A local MCP client can register the server with a stdio command configuration:
+The supported MCP dependency range is `mcp>=1.0,<2.0`, matching the FastMCP API used by this project.
+
+## Run the local server
+
+Set the identity path in the environment rather than passing private key material on the command line:
+
+```bash
+export FLOPKIT_IDENTITY_PATH="$PWD/identity.pem"
+python -m flopkit.mcp_server
+```
+
+On PowerShell, use:
+
+```powershell
+$env:FLOPKIT_IDENTITY_PATH = "$PWD\identity.pem"
+python -m flopkit.mcp_server
+```
+
+The server communicates over stdio. Configure your MCP client to launch it with the same Python interpreter from the activated environment. A conceptual configuration is:
 
 ```json
 {
   "mcpServers": {
     "flopkit": {
-      "command": "python",
+      "command": "/absolute/path/to/sdk/.venv/bin/python",
       "args": ["-m", "flopkit.mcp_server"],
-      "cwd": "/path/to/flopkit/sdk",
       "env": {
-        "FLOPKIT_IDENTITY": "/path/to/identity.pem",
-        "FLOPKIT_PASSPHRASE": "provided-by-your-secret-manager"
+        "FLOPKIT_IDENTITY_PATH": "/absolute/path/to/identity.pem"
       }
     }
   }
 }
 ```
 
-The server exposes identity generation, Technocore onboarding, message signing and verification, contribution logging, and proof export. Never paste a wallet seed phrase into any tool input.
+On Windows, use the absolute path to `.venv\\Scripts\\python.exe` and a Windows path for `FLOPKIT_IDENTITY_PATH`.
+
+The server returns public DID information where appropriate and never returns private keys, passphrases, or seed phrases. Do not place secrets in client configuration files that are committed to Git.
