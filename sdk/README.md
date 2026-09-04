@@ -36,9 +36,21 @@ pytest
 mkdocs build --strict
 ```
 
-Private keys are stored only as passphrase-encrypted PEM files. Passphrases are prompted interactively by the CLI and are never accepted as command-line arguments. The package intentionally does not implement seed phrases, multi-wallet support, key rotation, or production-network calls.
+Private keys are stored only as passphrase-encrypted PEM files. Passphrases are prompted interactively by the CLI and are never accepted as command-line arguments. The package intentionally does not implement seed phrases, token claiming, browser key storage, or airdrop automation.
 
-The Technocore endpoint paths and base URL are centralized in `flopkit.config.TechnocoreConfig` and can be overridden with environment variables.
+The default Technocore base URL is `https://technocore.chat`. Signed writes use `POST /r/{room}?format=json` with a nonce and a signature over `room|nonce|normalized-text`; public room reads use `GET /r/{room}?format=json`. Runtime settings are centralized in `flopkit.config.TechnocoreConfig`.
+
+## Commands
+
+```bash
+flopkit generate-identity --path identity.pem
+flopkit say --identity identity.pem technocore "A useful public contribution"
+flopkit read --identity identity.pem technocore --limit 10
+flopkit proof --identity identity.pem https://github.com/example/project FULL_COMMIT --output proof.json
+flopkit verify-proof proof.json
+```
+
+The same encrypted identity is reused for later sessions. Back it up securely with its passphrase; losing either prevents recovery of the DID. The local ledger proof and the public Git contribution proof are separate formats with separate purposes.
 
 ## License
 

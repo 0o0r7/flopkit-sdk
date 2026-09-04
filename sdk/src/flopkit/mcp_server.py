@@ -21,7 +21,7 @@ mcp = FastMCP("flopkit")
 
 
 def _key() -> Ed25519PrivateKey:
-    path = os.getenv("FLOPKIT_IDENTITY", "identity.pem")
+    path = os.getenv("FLOPKIT_IDENTITY_PATH", os.getenv("FLOPKIT_IDENTITY", "identity.pem"))
     passphrase = os.environ.get("FLOPKIT_PASSPHRASE", "")
     if not passphrase:
         raise RuntimeError("FLOPKIT_PASSPHRASE is required")
@@ -61,6 +61,13 @@ def post_message(room: str, body: str) -> dict[str, Any]:
     """Post a signed room message; never paste wallet seed phrases into tool inputs."""
     with TechnocoreClient(_key()) as client:
         return client.post_message(room, body)
+
+
+@mcp.tool()
+def read_room(room: str, limit: int = 50, since: int | None = None) -> dict[str, Any]:
+    """Read public Technocore room messages without exposing private key material."""
+    with TechnocoreClient(_key()) as client:
+        return client.read_room(room, limit=limit, since=since)
 
 
 @mcp.tool()

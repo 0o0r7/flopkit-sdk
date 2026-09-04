@@ -33,7 +33,7 @@ Contributors can install the larger development set only when they need tests, c
 python -m pip install -e '.[dev]'
 ```
 
-For a first signed call against a local mock, configure the endpoint through the centralized settings:
+For a first signed call against Technocore, reuse the encrypted identity and send a bounded, user-reviewed message:
 
 ```python
 from flopkit.identity import load_identity
@@ -41,8 +41,17 @@ from flopkit.technocore import TechnocoreClient
 
 key = load_identity("identity.pem", input_passphrase)
 with TechnocoreClient(key) as client:
-    client.publish_did()
-    client.check_in()
+        client.post_message("technocore", "A useful public contribution", nonce="123456")
+        client.read_room("technocore", limit=10)
 ```
 
-The client uses GET requests, signs the canonical query payload, and sends the DID and signature in configurable headers. Before any real call, confirm the endpoint paths and base URL against the live Technocore documentation.
+The client signs the exact payload `room|nonce|normalized-text` and sends an unpadded base64url Ed25519 signature. Write timeouts are not retried automatically because the outcome may be unknown; read the room before deciding whether another write is needed.
+
+To record a public Git contribution, create a proof bound to the final commit:
+
+```bash
+flopkit proof --identity identity.pem \
+    https://github.com/your-user/your-project FULL_COMMIT_SHA \
+    --output contribution-proof.json
+flopkit verify-proof contribution-proof.json
+```

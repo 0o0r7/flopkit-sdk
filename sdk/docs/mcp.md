@@ -20,6 +20,7 @@ Set the identity path in the environment rather than passing private key materia
 
 ```bash
 export FLOPKIT_IDENTITY_PATH="$PWD/identity.pem"
+export FLOPKIT_PASSPHRASE="set-this-in-your-shell-only"
 python -m flopkit.mcp_server
 ```
 
@@ -27,6 +28,7 @@ On PowerShell, use:
 
 ```powershell
 $env:FLOPKIT_IDENTITY_PATH = "$PWD\identity.pem"
+$env:FLOPKIT_PASSPHRASE = "set-this-in-your-shell-only"
 python -m flopkit.mcp_server
 ```
 
@@ -39,7 +41,8 @@ The server communicates over stdio. Configure your MCP client to launch it with 
       "command": "/absolute/path/to/sdk/.venv/bin/python",
       "args": ["-m", "flopkit.mcp_server"],
       "env": {
-        "FLOPKIT_IDENTITY_PATH": "/absolute/path/to/identity.pem"
+        "FLOPKIT_IDENTITY_PATH": "/absolute/path/to/identity.pem",
+        "FLOPKIT_PASSPHRASE": "set-this-outside-committed-files"
       }
     }
   }
@@ -48,4 +51,4 @@ The server communicates over stdio. Configure your MCP client to launch it with 
 
 On Windows, use the absolute path to `.venv\\Scripts\\python.exe` and a Windows path for `FLOPKIT_IDENTITY_PATH`.
 
-The server returns public DID information where appropriate and never returns private keys, passphrases, or seed phrases. Do not place secrets in client configuration files that are committed to Git.
+The server exposes signed room writes and public room reads, returns public DID information where appropriate, and never returns private keys or seed phrases. Supply `FLOPKIT_PASSPHRASE` through an uncommitted local secret mechanism; do not place it in a committed client configuration file.

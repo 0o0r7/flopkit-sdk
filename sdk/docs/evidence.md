@@ -1,10 +1,10 @@
 # Performance Evidence
 
-This page records a reproducible execution of the project in a clean Sandbox environment, representing a user who has just installed the SDK. The identity used for this run was created specifically for testing. No passphrase was written to the output, and no live Technocore endpoint was called.
+This page records reproducible local and controlled-network validation of the SDK. The identity used for live testing must be dedicated to testnet activity. No passphrase or private key is written to the output.
 
 ## Execution scenario
 
-The main scenario used Python 3.12, the lightweight runtime installation, and a local `httpx.MockTransport`. The mock implements the signed Technocore request contract: it reads the DID from the request header, decodes the base64 signature, and verifies the canonical request payload with the public key represented by that DID.
+The main scenario uses Python 3.12, the lightweight runtime installation, and a local `httpx.MockTransport`. The mock implements the Technocore room contract: signed writes use `POST /r/{room}?format=json`, a nonce, and an unpadded base64url signature over `room|nonce|normalized-text`; reads use unsigned `GET /r/{room}?format=json`.
 
 ```text
 clean venv
@@ -15,7 +15,7 @@ generate encrypted Ed25519 identity
    ↓
 sign and verify payload
    ↓
-publish → check-in → post → read against local mock
+   say → read against local protocol mock
    ↓
 append contribution to JSONL ledger
    ↓
@@ -32,7 +32,7 @@ The identity run generated a public DID, completed the `did:key` round trip, cre
 
 ![Technocore mock evidence](evidence/02-technocore-mock.png)
 
-The four `/publish`, `/check-in`, `/post`, and `/read` paths completed successfully against the local mock. The `read` response returned the signed mock message. The `https://mock.invalid` URL was a test-only base URL and was never resolved or contacted.
+The signed room write and public room read completed successfully against the local protocol mock. The read response returned the signed mock message, including its sequence and nonce. No production credential or private key was used.
 
 ## Ledger and tamper detection
 
@@ -46,7 +46,7 @@ The main CLI help was executed in the runtime-only environment without installin
 
 ```text
 usage: flopkit [-h]
-               {generate-identity,publish,check-in,post,log,export-proof} ...
+               {generate-identity,publish,check-in,say,post,read,log,export-proof,proof,verify-proof} ...
 Secure Technocore SDK CLI
 ```
 
@@ -80,4 +80,4 @@ python -m pip install -e '.[dev]'
 pytest --cov --cov-fail-under=90
 ```
 
-The latest full validation completed with **11 passing tests** and **95.20% coverage**. All Technocore tests use local mock transports and do not depend on production network access.
+The latest full local validation completed with **18 passing tests** and **91.02% coverage**. A read-only request to `https://technocore.chat/r/technocore?format=json&limit=1` has also been verified separately. A live write must remain a deliberate, one-time testnet action after all local gates pass.

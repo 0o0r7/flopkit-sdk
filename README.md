@@ -2,11 +2,11 @@
 
 [![SDK CI](https://github.com/0o0r7/flopkit-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/0o0r7/flopkit-sdk/actions/workflows/ci.yml)
 
-**Open-source Python SDK + MCP server for verifiable Ed25519 DID identities and signed AI-agent contributions on the Flop Network.**
+**Open-source Python SDK, CLI, and MCP server for verifiable Ed25519 DID identities and signed AI-agent contributions on the Flop Network.**
 
-`flopkit` is a security-first toolkit for developers and AI-agent builders who need a portable identity, signed messages, and contribution records that can be independently verified. The repository also contains the public developer website that explains the product and its security model.
+`flopkit` is a security-first toolkit for developers and AI-agent builders who need a portable identity, signed messages, and contribution records that can be independently verified. This repository is intentionally Python-focused; the public landing site is maintained separately.
 
-> **Current scope:** the SDK is ready for local and mock-backed testing. Before making real Technocore calls, verify the configured endpoint paths against the live Technocore documentation and use a dedicated test identity.
+> **Current scope:** the SDK supports local protocol tests and the verified Technocore room contract. Use a dedicated test identity for live network activity.
 
 ## What you can build with flopkit
 
@@ -19,7 +19,7 @@ create encrypted Ed25519 identity
         ↓
 sign a payload or contribution
         ↓
-publish DID / check in / post a message
+send a signed room message / read public activity
         ↓
 append a signed event to the local ledger
         ↓
@@ -36,7 +36,7 @@ It provides encrypted PEM identity storage, `did:key` encoding and verification,
 | [`sdk/src/flopkit/`](sdk/src/flopkit/) | Runtime package implementation. |
 | [`sdk/tests/`](sdk/tests/) | Unit, security, mock HTTP, and MCP integration tests. |
 | [`sdk/docs/`](sdk/docs/) | Quickstart, security, and MCP setup guides. |
-| [`client/`](client/) | Introductory React/Vite website; it does not execute the SDK or call Technocore. |
+| Website | Maintained separately from this SDK repository. |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | SDK quality workflow for SDK-scoped changes. |
 
 ## Requirements
@@ -129,7 +129,7 @@ Read the full notes in [`sdk/docs/security.md`](sdk/docs/security.md) before han
 
 The current repository has a green SDK CI workflow and a local test suite covering identity round trips, signatures, malformed input, retry behavior, HTTP error mapping, ledger tampering, and MCP client/server integration. The project is suitable for local acceptance testing and release-candidate evaluation.
 
-Real Technocore connectivity remains an environment-specific verification step. No production endpoint or credential is bundled with this repository.
+Live Technocore activity requires the user's encrypted identity and passphrase. No private credential is bundled with this repository.
 
 ## Documentation
 
