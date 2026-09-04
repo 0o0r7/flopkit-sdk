@@ -136,6 +136,7 @@ Real Technocore connectivity remains an environment-specific verification step. 
 - [SDK Quickstart](sdk/docs/quickstart.md)
 - [Security notes](sdk/docs/security.md)
 - [MCP setup](sdk/docs/mcp.md)
+- [Performance evidence](sdk/docs/evidence.md)
 - [SDK package README](sdk/README.md)
 - [Developer website](https://flopkit-sdk-73hvdzpz.manus.space/)
 

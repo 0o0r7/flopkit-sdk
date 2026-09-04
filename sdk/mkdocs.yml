@@ -8,3 +8,4 @@ nav:
   - Quickstart: quickstart.md
   - Security: security.md
   - MCP setup: mcp.md
+  - Performance evidence: evidence.md
