@@ -1,10 +1,10 @@
-# عملکرد واقعی و Evidence
+# Performance Evidence
 
-این صفحه نتیجه‌ی اجرای reproducible پروژه در یک محیط تمیز Sandbox است؛ محیطی مشابه کاربری که SDK را تازه نصب کرده است. برای جلوگیری از افشای اطلاعات حساس، identity فقط برای همین اجرا ساخته شد، passphrase هرگز در خروجی ثبت نشد، و هیچ endpoint واقعی Technocore فراخوانی نشد.
+This page records a reproducible execution of the project in a clean Sandbox environment, representing a user who has just installed the SDK. The identity used for this run was created specifically for testing. No passphrase was written to the output, and no live Technocore endpoint was called.
 
-## سناریوی اجرا
+## Execution scenario
 
-اجرای اصلی با Python 3.12، نصب runtime-only و یک `httpx.MockTransport` محلی انجام شد. mock همان قرارداد امضاشده‌ی Technocore را بررسی کرد: DID از header خوانده شد، signature از base64 decode شد و payload canonical با کلید عمومی DID verify شد.
+The main scenario used Python 3.12, the lightweight runtime installation, and a local `httpx.MockTransport`. The mock implements the signed Technocore request contract: it reads the DID from the request header, decodes the base64 signature, and verifies the canonical request payload with the public key represented by that DID.
 
 ```text
 clean venv
@@ -22,27 +22,27 @@ append contribution to JSONL ledger
 export proof → mutate event → export again
 ```
 
-## Identity و امضا
+## Identity and signing
 
 ![Identity and signing evidence](evidence/01-identity-and-signing.png)
 
-نتیجه‌ی واقعی اجرای identity این بود که یک DID عمومی تولید شد، round-trip مربوط به `did:key` موفق بود، فایل PEM با mode `0600` ساخته شد و signature ادعاشده توسط verify تأیید شد. private key و passphrase در این صفحه یا در output ذخیره نشده‌اند.
+The identity run generated a public DID, completed the `did:key` round trip, created the PEM file with mode `0600`, and verified the generated Ed25519 signature. The page and its evidence output contain no private key or passphrase.
 
 ## Signed Technocore flow
 
 ![Technocore mock evidence](evidence/02-technocore-mock.png)
 
-چهار مسیر `/publish`، `/check-in`، `/post` و `/read` با موفقیت علیه mock محلی اجرا شدند. پاسخ `read` همان پیام signed را برگرداند. آدرس `https://mock.invalid` فقط یک base URL تستی بود و هیچ DNS یا اتصال شبکه‌ای برای آن انجام نشد.
+The four `/publish`, `/check-in`, `/post`, and `/read` paths completed successfully against the local mock. The `read` response returned the signed mock message. The `https://mock.invalid` URL was a test-only base URL and was never resolved or contacted.
 
-## Ledger و tamper detection
+## Ledger and tamper detection
 
 ![Ledger and proof evidence](evidence/03-ledger-and-proof.png)
 
-یک contribution در JSONL ledger ثبت و به proof تبدیل شد. proof پیش از تغییر معتبر بود. سپس فقط description event تغییر داده شد؛ export بعدی مقدار `valid: false` و event نامعتبر را گزارش کرد. این رفتار نشان می‌دهد که تغییر محتوا silently پذیرفته نمی‌شود.
+A contribution was appended to the JSONL ledger and exported to a proof file. The proof was valid before modification. The event description was then changed, and the next export reported `valid: false` for the tampered event. This demonstrates that content changes are detected rather than silently accepted.
 
 ## CLI smoke test
 
-در همان runtime-only environment، help اصلی CLI بدون نصب ابزار توسعه اجرا شد:
+The main CLI help was executed in the runtime-only environment without installing development tooling:
 
 ```text
 usage: flopkit [-h]
@@ -50,7 +50,7 @@ usage: flopkit [-h]
 Secure Technocore SDK CLI
 ```
 
-برای اجرای کاربر واقعی:
+A new user can reproduce the basic local setup with:
 
 ```bash
 python -m venv .venv
@@ -60,24 +60,24 @@ flopkit --help
 flopkit generate-identity --path identity.pem
 ```
 
-برای قابلیت MCP، dependency آن را فقط به‌صورت اختیاری نصب کنید:
+MCP support is optional and can be installed only when required:
 
 ```bash
 python -m pip install -e '.[mcp]'
 python -m flopkit.mcp_server
 ```
 
-## تفسیر نتیجه
+## Result interpretation
 
-این evidence ثابت می‌کند که هسته‌ی SDK در محیط تمیز قابل نصب و اجراست، identity و signature واقعاً کار می‌کنند، کلاینت درخواست‌های signed را به mock معتبر ارسال می‌کند و ledger دست‌کاری را تشخیص می‌دهد. این evidence به‌تنهایی صحت endpointهای زنده‌ی Technocore یا آمادگی production آن endpointها را اثبات نمی‌کند؛ آن بخش نیازمند تطبیق دستی configuration با مستندات زنده و یک تست کنترل‌شده با identity آزمایشی است.
+This evidence demonstrates that the core SDK installs and runs in a clean environment, identity and signatures work, the client sends signed requests to a validating local mock, and the ledger detects tampering. It does not prove that live Technocore endpoint paths are correct or that a production service is available. Those claims require manual configuration review against the live Technocore documentation and a controlled test using a dedicated test identity.
 
-## بازتولید
+## Reproduction
 
-سناریوی استفاده‌شده برای این صفحه در محیط اجرایی داخلی تولید شد و خروجی آن فقط شامل داده‌های عمومی و test-only است. برای بازتولید مستقل، ابتدا دستورهای نصب بالا را اجرا کنید، سپس تست‌های پروژه را با development extras اجرا کنید:
+The evidence scenario contains only public test output and test-only data. To reproduce the broader validation suite, install the development extras and run:
 
 ```bash
 python -m pip install -e '.[dev]'
 pytest --cov --cov-fail-under=90
 ```
 
-آخرین اجرای کامل validation شامل **۱۱ تست موفق** و **۹۵٫۲۰٪ coverage** بوده است. تست‌ها با mock محلی اجرا می‌شوند و به production Technocore وابسته نیستند.
+The latest full validation completed with **11 passing tests** and **95.20% coverage**. All Technocore tests use local mock transports and do not depend on production network access.
