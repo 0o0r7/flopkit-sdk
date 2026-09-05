@@ -1,56 +1,56 @@
-# Performance Evidence
+# Performance and validation evidence
 
-This page records a reproducible execution of the project in a clean Sandbox environment, representing a user who has just installed the SDK. The identity used for this run was created specifically for testing. No passphrase was written to the output, and no live Technocore endpoint was called.
+This page documents reproducible validation for the SDK-only architecture. It separates automated local evidence from claims that require a deliberate live testnet action. No passphrase, private key, token, or production credential belongs in the evidence files.
 
-## Execution scenario
+## Validated execution flow
 
-The main scenario used Python 3.12, the lightweight runtime installation, and a local `httpx.MockTransport`. The mock implements the signed Technocore request contract: it reads the DID from the request header, decodes the base64 signature, and verifies the canonical request payload with the public key represented by that DID.
+The controlled scenario uses Python 3.12, the lightweight runtime installation, and a local `httpx.MockTransport`. The mock validates the Technocore room contract: signed writes use the configured write endpoint, a nonce, and an unpadded base64url Ed25519 signature over the normalized request payload; public reads use the configured read endpoint.
 
 ```text
-clean venv
-   ↓
-pip install -e .
-   ↓
-generate encrypted Ed25519 identity
-   ↓
-sign and verify payload
-   ↓
-publish → check-in → post → read against local mock
-   ↓
-append contribution to JSONL ledger
-   ↓
-export proof → mutate event → export again
+clean virtual environment
+          ↓
+install core runtime only
+          ↓
+create encrypted Ed25519 identity
+          ↓
+round-trip did:key and verify a signature
+          ↓
+send signed write and public read to a validating local mock
+          ↓
+append a signed contribution to the local ledger
+          ↓
+export a proof, mutate an event, and detect tampering
 ```
 
 ## Identity and signing
 
 ![Identity and signing evidence](evidence/01-identity-and-signing.png)
 
-The identity run generated a public DID, completed the `did:key` round trip, created the PEM file with mode `0600`, and verified the generated Ed25519 signature. The page and its evidence output contain no private key or passphrase.
+The identity scenario produces a public DID, verifies the `did:key` conversion round trip, creates an encrypted PEM file with owner-only permissions where supported, and validates an Ed25519 signature. The evidence output contains no private key or passphrase.
 
 ## Signed Technocore flow
 
 ![Technocore mock evidence](evidence/02-technocore-mock.png)
 
-The four `/publish`, `/check-in`, `/post`, and `/read` paths completed successfully against the local mock. The `read` response returned the signed mock message. The `https://mock.invalid` URL was a test-only base URL and was never resolved or contacted.
+The client completes a signed room write and a public room read against a local protocol mock. The mock checks the request signature and returns a deterministic test message. This proves client-side request construction and verification without contacting the live service.
 
-## Ledger and tamper detection
+## Ledger and proof tamper detection
 
 ![Ledger and proof evidence](evidence/03-ledger-and-proof.png)
 
-A contribution was appended to the JSONL ledger and exported to a proof file. The proof was valid before modification. The event description was then changed, and the next export reported `valid: false` for the tampered event. This demonstrates that content changes are detected rather than silently accepted.
+A contribution is appended to the JSONL ledger and exported to a proof file. The original proof verifies successfully. After the event description is changed, the next verification reports the event as invalid. Content changes are therefore detected rather than silently accepted.
 
-## CLI smoke test
+## Runtime-only CLI smoke test
 
-The main CLI help was executed in the runtime-only environment without installing development tooling:
+The CLI help is available after the core installation, without installing the development toolchain:
 
 ```text
 usage: flopkit [-h]
-               {generate-identity,publish,check-in,post,log,export-proof} ...
+               {generate-identity,publish,check-in,say,post,read,log,export-proof,proof,verify-proof} ...
 Secure Technocore SDK CLI
 ```
 
-A new user can reproduce the basic local setup with:
+A new user can reproduce the runtime-only smoke test with:
 
 ```bash
 python -m venv .venv
@@ -60,24 +60,27 @@ flopkit --help
 flopkit generate-identity --path identity.pem
 ```
 
-MCP support is optional and can be installed only when required:
+MCP is deliberately separate:
 
 ```bash
 python -m pip install -e '.[mcp]'
 python -m flopkit.mcp_server
 ```
 
-## Result interpretation
+## Full local quality gate
 
-This evidence demonstrates that the core SDK installs and runs in a clean environment, identity and signatures work, the client sends signed requests to a validating local mock, and the ledger detects tampering. It does not prove that live Technocore endpoint paths are correct or that a production service is available. Those claims require manual configuration review against the live Technocore documentation and a controlled test using a dedicated test identity.
-
-## Reproduction
-
-The evidence scenario contains only public test output and test-only data. To reproduce the broader validation suite, install the development extras and run:
+From `sdk/`, install the contributor extra and run:
 
 ```bash
 python -m pip install -e '.[dev]'
+ruff check .
+mypy .
 pytest --cov --cov-fail-under=90
+mkdocs build --strict
 ```
 
-The latest full validation completed with **11 passing tests** and **95.20% coverage**. All Technocore tests use local mock transports and do not depend on production network access.
+The exact test count and coverage percentage are generated by the current test run and should be reported from CI output rather than copied as an unverifiable static claim.
+
+## What this evidence proves
+
+The evidence demonstrates that the SDK-only repository can install its core runtime in a clean environment, create and protect an identity, sign and verify data, construct signed client requests against a validating local mock, and detect ledger tampering. It does not prove live endpoint availability, production service behavior, or a user’s external network configuration. Those claims require a manual configuration review and a controlled one-time test with a dedicated test identity.

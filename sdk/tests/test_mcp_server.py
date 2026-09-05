@@ -21,6 +21,20 @@ class MockTechnocoreHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlsplit(self.path)
+        if parsed.path.startswith("/r/"):
+            room = parsed.path.removeprefix("/r/")
+            self._respond(
+                200,
+                {
+                    "room": room,
+                    "count": len(self.messages),
+                    "first_seq": 1 if self.messages else 0,
+                    "last_seq": len(self.messages),
+                    "generation": 0,
+                    "messages": self.messages,
+                },
+            )
+            return
         params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
         did = self.headers.get("X-Flop-DID", "")
         encoded_signature = self.headers.get("X-Flop-Signature", "")
@@ -38,6 +52,36 @@ class MockTechnocoreHandler(BaseHTTPRequestHandler):
             self._respond(200, {"ok": True, "messages": self.messages})
             return
         self._respond(200, {"ok": True, "path": parsed.path})
+
+    def do_POST(self) -> None:
+        parsed = urlsplit(self.path)
+        if not parsed.path.startswith("/r/"):
+            self._respond(404, {"error": "unknown endpoint"})
+            return
+        room = parsed.path.removeprefix("/r/")
+        length = int(self.headers.get("Content-Length", "0"))
+        body = json.loads(self.rfile.read(length))
+        did = body["did"]
+        nonce = str(body["nonce"])
+        text = body["text"]
+        signature = base64.urlsafe_b64decode(body["sig"] + "==")
+        if not verify_signature(did, f"{room}|{nonce}|{text}".encode(), signature):
+            self._respond(401, {"error": "invalid signature"})
+            return
+        posted = {"seq": len(self.messages) + 1, "from": did, "nonce": nonce, "text": text}
+        self.messages.append(posted)
+        self._respond(
+            200,
+            {
+                "room": room,
+                "count": len(self.messages),
+                "first_seq": 1,
+                "last_seq": posted["seq"],
+                "generation": 0,
+                "posted": posted,
+                "messages": self.messages,
+            },
+        )
 
     @staticmethod
     def _canonical(params: dict[str, str]) -> bytes:
@@ -92,6 +136,8 @@ async def _run_mcp_flow(tmp_path: Path, port: int) -> None:
             ):
                 result = await session.call_tool(name, arguments)
                 assert not result.isError
+            room = await session.call_tool("read_room", {"room": "agents", "limit": 10})
+            assert not room.isError
             proof = await session.call_tool(
                 "log_contribution", {"url": "https://example.org", "description": "demo"}
             )
