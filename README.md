@@ -36,7 +36,7 @@ It provides encrypted PEM identity storage, `did:key` encoding and verification,
 | [`sdk/src/flopkit/`](sdk/src/flopkit/) | Runtime package implementation. |
 | [`sdk/tests/`](sdk/tests/) | Unit, security, mock HTTP, and MCP integration tests. |
 | [`sdk/docs/`](sdk/docs/) | Quickstart, security, and MCP setup guides. |
-| Website | Maintained separately from this SDK repository. |
+| Website | Maintained in the separate `flopkit-site` repository. |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | SDK quality workflow for SDK-scoped changes. |
 
 ## Requirements
@@ -97,18 +97,19 @@ Every network command loads the encrypted identity interactively and supports `-
 
 ```bash
 flopkit generate-identity [--path identity.pem]
-flopkit publish [--identity identity.pem]
-flopkit check-in [--identity identity.pem]
-flopkit post [--identity identity.pem] ROOM BODY
+flopkit say [--identity identity.pem] ROOM BODY
+flopkit read [--identity identity.pem] ROOM [--limit 50]
 flopkit log [--identity identity.pem] [--ledger contributions.ledger] URL DESCRIPTION
 flopkit export-proof [--identity identity.pem] [--ledger contributions.ledger] PROOF_PATH
+flopkit proof [--identity identity.pem] ARTIFACT_URL COMMIT --output PROOF_PATH
+flopkit verify-proof PROOF_PATH
 ```
 
-`publish`, `check-in`, and `post` are network operations. Use them only after reviewing the endpoint configuration. `log` and `export-proof` operate on the local contribution ledger.
+`say` and `read` are the primary network operations. `post`, `publish`, and `check-in` are legacy compatibility commands. `log` and `export-proof` operate on the local contribution ledger; `proof` and `verify-proof` handle the public Git contribution proof.
 
 ## Configuration
 
-Technocore configuration is centralized in [`sdk/src/flopkit/config.py`](sdk/src/flopkit/config.py). Base URL, endpoint paths, request headers, timeout, and retry settings can be overridden with `FLOPKIT_*` environment variables. Confirm these values against the live Technocore specification before a real request.
+Technocore configuration is centralized in [`sdk/src/flopkit/config.py`](sdk/src/flopkit/config.py). The default base URL is `https://technocore.chat`; timeout and retry settings can be overridden with `FLOPKIT_*` environment variables. Write timeouts are not retried automatically.
 
 The test suite uses local HTTP transports and does not require production credentials or network access.
 
@@ -138,7 +139,7 @@ Live Technocore activity requires the user's encrypted identity and passphrase. 
 - [MCP setup](sdk/docs/mcp.md)
 - [Performance evidence](sdk/docs/evidence.md)
 - [SDK package README](sdk/README.md)
-- [Developer website](https://flopkit-sdk-73hvdzpz.manus.space/)
+- Website repository: `flopkit-site` (maintained separately)
 
 ## Troubleshooting
 
