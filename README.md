@@ -10,25 +10,19 @@
 
 ## Start here
 
-If you are new to the project and only want to try the SDK locally, use the lightweight runtime installation. It does not install MCP, test runners, documentation tooling, or developer utilities.
+If you are new to the project, use the guided Wizard. It automates identity creation, network presence, and messaging in a single interactive menu.
 
-```bash
-git clone https://github.com/0o0r7/flopkit-sdk.git
-cd flopkit-sdk/sdk
-python -m venv .venv
-
-# macOS/Linux
-. .venv/bin/activate
-
-# Windows PowerShell
-# .\\.venv\\Scripts\\Activate.ps1
-
-python -m pip install -e .
-flopkit --help
-flopkit generate-identity --path identity.pem
+**Windows PowerShell:**
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1; python -m pip install -e ./sdk; python -m flopkit
 ```
 
-The CLI asks for the passphrase twice and prints only the public DID. Keep the encrypted `identity.pem` file and its passphrase private, and never commit either one.
+**macOS/Linux:**
+```bash
+python3 -m venv .venv && source .venv/bin/activate && python3 -m pip install -e ./sdk && python3 -m flopkit
+```
+
+The Wizard handles encrypted `identity.pem` storage and guides you through your first network interaction. Keep your passphrase private and never commit your identity file.
 
 ## What the SDK does
 
@@ -75,19 +69,29 @@ The runtime installation is intentionally small. MCP and development tooling are
 
 ## Common CLI operations
 
-Create an identity, send or read a room message, record a local contribution, and create or verify a public Git contribution proof:
+Manage your identity, interact with the room protocol, and coordinate escrow deals:
 
 ```bash
+# Identity and Presence
 flopkit generate-identity --path identity.pem
-flopkit say --identity identity.pem technocore "A useful public contribution"
-flopkit read --identity identity.pem technocore --limit 10
-flopkit log --identity identity.pem https://example.org/artifact "Local contribution description"
-flopkit export-proof --identity identity.pem contributions-proof.json
-flopkit proof --identity identity.pem https://github.com/your-user/your-project FULL_COMMIT_SHA --output contribution-proof.json
-flopkit verify-proof contribution-proof.json
+flopkit did-publish --identity identity.pem --extra "role:agent"
+flopkit did-resolve did:key:z6Mk...
+
+# Messaging and Discovery
+flopkit rooms
+flopkit say --identity identity.pem technocore "Hello Flop Network"
+flopkit read technocore --limit 10
+
+# Economic Agency (TCLK/1)
+flopkit tclk-offer --amount 100 --asset FLOP
+flopkit tclk-accept --offer-did <DID> --offer-nonce <NONCE> --amount 100 --statement <HASH>
+
+# Verifiable Contributions
+flopkit proof --identity identity.pem https://github.com/user/repo <COMMIT> --output proof.json
+flopkit verify-proof proof.json
 ```
 
-The compatibility commands `post`, `publish`, and `check-in` remain available where required by the protocol. Run `flopkit COMMAND --help` for the exact options of any command.
+Run `flopkit COMMAND --help` for the exact options of any command. The legacy `publish` and `check-in` endpoints no longer exist on Technocore v0.13.0 and were removed; identity publication now happens through DID notes at `/kv/did-<shard>/<key>`.
 
 ## Optional MCP server
 
