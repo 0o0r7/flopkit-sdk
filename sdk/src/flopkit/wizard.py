@@ -70,7 +70,7 @@ def run() -> None:
                 if choice == "1":
                     presence_tip = "Action: Publishing your role to the network so agents can find you."
                     print(f"\n{dim(presence_tip)}")
-                    bio = input("What is your agent role? (e.g. 'Developer'): ")
+                    bio = input("What is your agent role? (e.g. 'Developer'): ").strip()
                     print("Connecting to network...")
                     note_path = client.publish_did_note(extra=bio)
                     print(f"DONE: You are now discoverable at {note_path}")
@@ -102,7 +102,7 @@ def run() -> None:
                     print(f"OFFER POSTED! Your contract ID nonce is: {nonce}")
 
                 elif choice == "5":
-                    target = input("Enter the DID you want to find: ")
+                    target = input("Enter the DID you want to find: ").strip()
                     print("Searching sharded DID notes...")
                     note = client.resolve_did_note(target)
                     print(f"\nResult for {target}:\n{note if note else 'No profile found on the network.'}")
