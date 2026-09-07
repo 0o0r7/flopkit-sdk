@@ -1,72 +1,86 @@
-"""Dependency-free interactive onboarding for the FlopKit CLI."""
-
+"""Guided interactive onboarding for the Flop Network."""
 from __future__ import annotations
 
 import getpass
-from collections.abc import Callable
 from pathlib import Path
-
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
 from .identity import generate_identity, load_identity, public_key_to_did
-from .technocore import TechnocoreClient
+from .technocore import TechnocoreClient, TechnocoreError
+from .tclk import TCLKManager
 
-Input = Callable[[str], str]
-Output = Callable[[str], None]
-
-
-def run(input_fn: Input = input, output: Output = print) -> None:
-    """Run the interactive menu without introducing a runtime dependency."""
-    while True:
-        output("\nFlopKit")
-        output("1. Create identity")
-        output("2. Show my DID")
-        output("3. Send a signed message")
-        output("4. Read a Technocore room")
-        output("5. Exit")
-        choice = input_fn("Select an option: ").strip()
-        if choice == "1":
-            path = Path(input_fn("Identity path [identity.pem]: ").strip() or "identity.pem")
-            _create_identity_with(path, output)
-        elif choice == "2":
-            path = Path(input_fn("Identity path [identity.pem]: ").strip() or "identity.pem")
-            key = _load_identity_key_with(path)
-            output(public_key_to_did(key.public_key()))
-        elif choice == "3":
-            path = Path(input_fn("Identity path [identity.pem]: ").strip() or "identity.pem")
-            room = input_fn("Room [technocore]: ").strip() or "technocore"
-            text = input_fn("Message: ")
-            output(f"Room: {room}")
-            output(f"Message: {text}")
-            if input_fn("Send signed message? [y/N]: ").strip().lower() != "y":
-                output("Cancelled.")
-                continue
-            key = _load_identity_key_with(path)
-            with TechnocoreClient(key) as client:
-                result = client.post_message(room, text)
-            output(str(result))
-        elif choice == "4":
-            path = Path(input_fn("Identity path [identity.pem]: ").strip() or "identity.pem")
-            room = input_fn("Room [technocore]: ").strip() or "technocore"
-            key = _load_identity_key_with(path)
-            with TechnocoreClient(key) as client:
-                result = client.read_room(room)
-            output(str(result))
-        elif choice == "5":
+def run() -> None:
+    print("\n--- Welcome to the Flop Network ---")
+    path_str = input("Enter identity path [identity.pem]: ").strip() or "identity.pem"
+    path = Path(path_str)
+    
+    # 1. Identity Bootstrap
+    if not path.exists():
+        print(f"No identity found at {path_str}.")
+        if input("Create a new DID identity now? [Y/n]: ").lower() == 'n':
+            print("Exiting.")
             return
-        else:
-            output("Choose an option from 1 to 5.")
+        first = getpass.getpass("Set Passphrase: ")
+        second = getpass.getpass("Confirm Passphrase: ")
+        if first != second:
+            print("Error: Passphrases do not match.")
+            return
+        _, did = generate_identity(first, path)
+        print(f"Identity created! Your DID: {did}")
+        passphrase = first
+    else:
+        passphrase = getpass.getpass("Enter Passphrase to unlock DID: ")
 
+    # Load key once for the session
+    try:
+        key = load_identity(path, passphrase)
+        did = public_key_to_did(key.public_key())
+    except Exception as e:
+        print(f"Error unlocking identity: {e}")
+        return
 
-def _create_identity_with(path: Path, output: Output) -> None:
-    first = getpass.getpass("Passphrase: ")
-    second = getpass.getpass("Confirm passphrase: ")
-    if first != second:
-        raise ValueError("passphrases do not match")
-    _, did = generate_identity(first, path)
-    output(f"Created DID: {did}")
-    output("Back up the encrypted identity file and its passphrase separately.")
+    # 2. Main Menu Loop
+    while True:
+        print(f"\n[Active Identity: {did[:16]}...]")
+        print("1. Network Presence: Sync Profile  2. Messaging: Send Signed")
+        print("3. Discovery: List Rooms           4. Economy: TCLK Offer")
+        print("5. Resolve: Lookup DID Profile     6. Exit")
+        
+        choice = input("Select an option: ").strip()
+        
+        try:
+            with TechnocoreClient(key) as client:
+                if choice == "1":
+                    bio = input("Enter your Agent role/bio: ")
+                    print("Syncing sharded DID note to network...")
+                    note_path = client.publish_did_note(extra=bio)
+                    print(f"SUCCESS: Your profile is live at {note_path}")
+                
+                elif choice == "2":
+                    room = input("Room name [technocore]: ").strip() or "technocore"
+                    text = input("Message: ")
+                    client.post_message(room, text)
+                    print("Signed message accepted by network.")
 
+                elif choice == "3":
+                    rooms = client.list_rooms()
+                    print("\n--- Active Public Rooms ---")
+                    print(rooms if rooms.strip() else "(No public activity found)")
 
-def _load_identity_key_with(path: Path) -> Ed25519PrivateKey:
-    return load_identity(path, getpass.getpass("Passphrase: "))
+                elif choice == "4":
+                    amount = input("Amount to offer: ")
+                    asset = input("Asset [FLOP]: ") or "FLOP"
+                    manager = TCLKManager(client)
+                    nonce = manager.post_offer(amount, asset, ["flop-htlc"])
+                    print(f"Offer posted to tclk-offers! Nonce: {nonce}")
+
+                elif choice == "5":
+                    target = input("Enter DID to resolve: ")
+                    note = client.resolve_did_note(target)
+                    print(f"\nProfile for {target}:\n{note if note else 'No profile found'}")
+
+                elif choice == "6":
+                    print("Goodbye!")
+                    break
+        except TechnocoreError as te:
+            print(f"Network Error: {te}")
+        except Exception as e:
+            print(f"Error: {e}")
