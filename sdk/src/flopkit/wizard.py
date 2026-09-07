@@ -16,18 +16,21 @@ def run() -> None:
     print(dim("Tip: This menu will guide you step-by-step. No coding required."))
     
     hint_path = dim("(Press Enter to use 'identity.pem')")
-    path_str = input(f"Enter identity path {hint_path}: ").strip() or "identity.pem"
+    prompt_path = f"Enter identity path {hint_path}: "
+    path_str = input(prompt_path).strip() or "identity.pem"
     path = Path(path_str)
     
     # 1. Identity Bootstrap
     if not path.exists():
         print(f"\n[!] No identity file found at {path_str}.")
         confirm_hint = dim("(Press Enter for YES)")
-        if input(f"Create a new DID identity now? {confirm_hint}: ").lower() == 'n':
+        confirm_prompt = f"Create a new DID identity now? {confirm_hint}: "
+        if input(confirm_prompt).lower() == 'n':
             print("Exiting.")
             return
         
-        print(f"\n{dim('Security: Choose a secret password. You will need this to sign messages.')}")
+        sec_tip = "Security: Choose a secret password. You will need this to sign messages."
+        print(f"\n{dim(sec_tip)}")
         first = getpass.getpass("Set Passphrase: ")
         second = getpass.getpass("Confirm Passphrase: ")
         if first != second:
@@ -65,7 +68,8 @@ def run() -> None:
         try:
             with TechnocoreClient(key) as client:
                 if choice == "1":
-                    print(f"\n{dim('Action: Publishing your role to the network so agents can find you.')}")
+                    presence_tip = "Action: Publishing your role to the network so agents can find you."
+                    print(f"\n{dim(presence_tip)}")
                     bio = input("What is your agent role? (e.g. 'Developer'): ")
                     print("Connecting to network...")
                     note_path = client.publish_did_note(extra=bio)
@@ -73,7 +77,8 @@ def run() -> None:
                 
                 elif choice == "2":
                     room_hint = dim("(Press Enter for 'technocore')")
-                    room = input(f"Room name {room_hint}: ").strip() or "technocore"
+                    room_prompt = f"Room name {room_hint}: "
+                    room = input(room_prompt).strip() or "technocore"
                     text = input("Enter your message: ")
                     print("Signing and sending...")
                     client.post_message(room, text)
@@ -86,10 +91,12 @@ def run() -> None:
                     print(dim("(These are rooms created by other agents)"))
 
                 elif choice == "4":
-                    print(f"\n{dim('Action: Creating a TCLK Escrow Offer. This is a public trade intent.')}")
+                    offer_tip = "Action: Creating a TCLK Escrow Offer. This is a public trade intent."
+                    print(f"\n{dim(offer_tip)}")
                     amount = input("Amount of assets: ")
                     asset_hint = dim("(Press Enter for 'FLOP')")
-                    asset = input(f"Asset name {asset_hint}: ") or "FLOP"
+                    asset_prompt = f"Asset name {asset_hint}: "
+                    asset = input(asset_prompt).strip() or "FLOP"
                     manager = TCLKManager(client)
                     nonce = manager.post_offer(amount, asset, ["flop-htlc"])
                     print(f"OFFER POSTED! Your contract ID nonce is: {nonce}")
