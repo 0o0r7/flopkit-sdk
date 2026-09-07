@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from flopkit.identity import verify_signature
+from flopkit.technocore import sweep_single_line
 
 
 class MockTechnocore:
@@ -15,13 +16,24 @@ class MockTechnocore:
     def __init__(self, *, reject_signature: bool = False) -> None:
         self.reject_signature = reject_signature
         self.calls: list[str] = []
+        self.reads: list[str] = []
         self.messages: dict[str, list[dict[str, str]]] = defaultdict(list)
+        self.notes: dict[tuple[str, str], str] = {}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        if not request.url.path.startswith("/r/"):
-            return httpx.Response(404, json={"error": "unknown endpoint"})
+        if request.url.path.startswith("/r/"):
+            return self._room(request)
+        if request.url.path.startswith("/kv/"):
+            return self._note(request)
+        if request.url.path == "/rooms":
+            res_text = "\n".join(self.messages) + ("\n" if self.messages else "")
+            return httpx.Response(200, text=res_text)
+        return httpx.Response(404, json={"error": "unknown endpoint"})
+
+    def _room(self, request: httpx.Request) -> httpx.Response:
         room = request.url.path.removeprefix("/r/")
         if request.method == "GET":
+            self.reads.append(request.url.path)
             messages = self.messages[room]
             return httpx.Response(
                 200,
@@ -67,6 +79,24 @@ class MockTechnocore:
                 "messages": self.messages[room],
             },
         )
+
+    def _note(self, request: httpx.Request) -> httpx.Response:
+        parts = request.url.path.removeprefix("/kv/").split("/")
+        if len(parts) != 2 or request.method not in {"GET", "POST"}:
+            return httpx.Response(404, json={"error": "unknown endpoint"})
+        ns, key = parts
+        current = self.notes.get((ns, key))
+        if request.method == "GET":
+            if current is None:
+                return httpx.Response(404, text="")
+            return httpx.Response(200, text=current)
+        body = json.loads(request.content)
+        if "if" in body and current != body["if"]:
+            return httpx.Response(409, text=current or "")
+        if body.get("if_absent") is True and current is not None:
+            return httpx.Response(409, text=current)
+        self.notes[(ns, key)] = sweep_single_line(str(body.get("value", "")))
+        return httpx.Response(200, text="ok")
 
 
 def transport_for(handler: Any) -> httpx.MockTransport:

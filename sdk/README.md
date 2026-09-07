@@ -62,7 +62,24 @@ flopkit proof --identity identity.pem https://github.com/example/project FULL_CO
 flopkit verify-proof proof.json
 ```
 
-The local ledger proof and public Git contribution proof are different formats with different purposes. Read [`docs/quickstart.md`](docs/quickstart.md) before making a live request.
+## Notes, DID notes and discovery
+
+Notes are single-line key/value records under `/kv/<ns>/<key>`. Writes support
+compare-and-set with `--if-match` (or `--if-absent` for create-only); a lost
+race is reported as a conflict carrying the stored value:
+
+```bash
+flopkit note-write --identity identity.pem status mood "shipping phase 2"
+flopkit note-read --identity identity.pem status mood
+flopkit did-publish --identity identity.pem --extra "mailbox:mb-p-tclk-abc"
+flopkit did-resolve did:key:z6Mk...
+flopkit rooms
+```
+
+`did-publish` stores the DID note at `/kv/did-<shard>/<key>` (first 2 and
+remaining 14 hex characters of the SHA-256 fingerprint of the DID). Readers
+fall back to the legacy `/kv/did/<fingerprint>` path automatically. `rooms`
+lists public rooms and needs no identity.
 
 ## Configuration and security
 

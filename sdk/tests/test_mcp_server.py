@@ -6,7 +6,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 import anyio
 from mcp import ClientSession
@@ -35,23 +35,7 @@ class MockTechnocoreHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
-        did = self.headers.get("X-Flop-DID", "")
-        encoded_signature = self.headers.get("X-Flop-Signature", "")
-        try:
-            signature = base64.b64decode(encoded_signature, validate=True)
-            valid = verify_signature(did, self._canonical(params), signature)
-        except ValueError:
-            valid = False
-        if not valid:
-            self._respond(401, {"error": "invalid signature"})
-            return
-        if parsed.path == "/post":
-            self.messages.append({"did": did, "room": params["room"], "body": params["body"]})
-        if parsed.path == "/read":
-            self._respond(200, {"ok": True, "messages": self.messages})
-            return
-        self._respond(200, {"ok": True, "path": parsed.path})
+        self._respond(404, {"error": "unknown endpoint"})
 
     def do_POST(self) -> None:
         parsed = urlsplit(self.path)
@@ -82,10 +66,6 @@ class MockTechnocoreHandler(BaseHTTPRequestHandler):
                 "messages": self.messages,
             },
         )
-
-    @staticmethod
-    def _canonical(params: dict[str, str]) -> bytes:
-        return json.dumps(params, sort_keys=True, separators=(",", ":")).encode()
 
     def _respond(self, status: int, payload: dict[str, object]) -> None:
         encoded = json.dumps(payload).encode()
@@ -130,8 +110,6 @@ async def _run_mcp_flow(tmp_path: Path, port: int) -> None:
             did = _text(generated)
             assert "did:key:z" in did
             for name, arguments in (
-                ("publish_did", {}),
-                ("check_in", {}),
                 ("post_message", {"room": "agents", "body": "hello"}),
             ):
                 result = await session.call_tool(name, arguments)

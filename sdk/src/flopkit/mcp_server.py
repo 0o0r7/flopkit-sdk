@@ -43,20 +43,6 @@ def generate_identity(passphrase: str) -> str:
 
 
 @mcp.tool()
-def publish_did() -> dict[str, Any]:
-    """Publish the current DID; never paste wallet seed phrases into tool inputs."""
-    with TechnocoreClient(_key()) as client:
-        return client.publish_did()
-
-
-@mcp.tool()
-def check_in() -> dict[str, Any]:
-    """Check in the current DID; never paste wallet seed phrases into tool inputs."""
-    with TechnocoreClient(_key()) as client:
-        return client.check_in()
-
-
-@mcp.tool()
 def post_message(room: str, body: str) -> dict[str, Any]:
     """Post a signed room message; never paste wallet seed phrases into tool inputs."""
     with TechnocoreClient(_key()) as client:
@@ -68,6 +54,35 @@ def read_room(room: str, limit: int = 50, since: int | None = None) -> dict[str,
     """Read public Technocore room messages without exposing private key material."""
     with TechnocoreClient(_key()) as client:
         return client.read_room(room, limit=limit, since=since)
+
+
+@mcp.tool()
+def read_note(ns: str, key: str) -> str | None:
+    """Read a Technocore note value; never paste wallet seed phrases into tool inputs."""
+    with TechnocoreClient(_key()) as client:
+        return client.read_note(ns, key)
+
+
+@mcp.tool()
+def write_note(ns: str, key: str, value: str, if_match: str | None = None,
+               if_absent: bool = False) -> str:
+    """Write a Technocore note value; never paste wallet seed phrases into tool inputs."""
+    with TechnocoreClient(_key()) as client:
+        return client.write_note(ns, key, value, if_match=if_match, if_absent=if_absent)
+
+
+@mcp.tool()
+def publish_did_note(extra: str = "") -> str:
+    """Publish this identity's DID note; never paste wallet seed phrases into tool inputs."""
+    with TechnocoreClient(_key()) as client:
+        return client.publish_did_note(extra=extra)
+
+
+@mcp.tool()
+def list_rooms() -> str:
+    """List public Technocore rooms; never paste wallet seed phrases into tool inputs."""
+    with TechnocoreClient() as client:
+        return client.list_rooms()
 
 
 @mcp.tool()

@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -21,11 +22,18 @@ from flopkit.proofs import (
     write_proof,
 )
 from flopkit.technocore import (
+    DuplicateMessageError,
+    NoteConflictError,
+    RateLimitedError,
     TechnocoreClient,
     TechnocoreError,
+    did_note_fingerprint,
+    did_note_path,
     encode_wire_signature,
     message_payload,
     normalize_message,
+    normalize_note,
+    room_classes,
     validate_base_url,
     validate_nonce,
     validate_room,
@@ -267,6 +275,105 @@ def test_read_options_and_validation(tmp_path: Path) -> None:
     assert seen == {"format": "json", "limit": "10", "since": "2", "wait": "1", "n": "3"}
 
 
+def test_note_roundtrip_and_missing_note(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.write_note("notes", "greeting", "hello world")
+        assert client.read_note("notes", "greeting") == "hello world"
+        assert client.read_note("notes", "missing") is None
+
+
+def test_note_cas_conflicts_and_success(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.write_note("notes", "state", "v1")
+        with pytest.raises(NoteConflictError) as match:
+            client.write_note("notes", "state", "v2", if_match="wrong")
+        assert match.value.current_value == "v1"
+        with pytest.raises(NoteConflictError):
+            client.write_note("notes", "state", "v2", if_absent=True)
+        client.write_note("notes", "state", "v2", if_match="v1")
+        assert client.read_note("notes", "state") == "v2"
+
+
+def test_note_rejects_if_match_with_if_absent(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    with TechnocoreClient(key, transport=httpx.MockTransport(MockTechnocore())) as client:
+        with pytest.raises(ValueError, match="only one of if_match and if_absent"):
+            client.write_note("notes", "key", "value", if_match="x", if_absent=True)
+
+
+def test_normalize_note_sweeps_and_bounds() -> None:
+    assert normalize_note("  a\nb\tc  ") == "a b c"
+    with pytest.raises(ValueError):
+        normalize_note("\n\t")
+    with pytest.raises(ValueError):
+        normalize_note("x" * 8193)
+
+
+def test_room_classes_parse_prefixes() -> None:
+    assert room_classes("e-commerce") == {"e"}
+    assert room_classes("mb-p-tclk-abc") == {"mb", "p"}
+    assert room_classes("lobby") == frozenset()
+
+
+def test_mint_room_name_uses_classes(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    with TechnocoreClient(key, transport=httpx.MockTransport(MockTechnocore())) as client:
+        default_name = client.mint_room_name()
+        assert default_name.startswith("p-")
+        assert validate_room(default_name) == default_name
+        mailbox_name = client.mint_room_name("mb-p")
+        assert mailbox_name.startswith("mb-p-")
+        assert validate_room(mailbox_name) == mailbox_name
+        with pytest.raises(ValueError):
+            client.mint_room_name("x")
+
+
+def test_did_note_fingerprint_and_path() -> None:
+    did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+    fingerprint = did_note_fingerprint(did)
+    assert re.fullmatch(r"[0-9a-f]{16}", fingerprint)
+    shard, key = did_note_path(did)
+    assert shard == fingerprint[:2]
+    assert key == fingerprint[2:]
+    assert len(shard) == 2 and len(key) == 14
+
+
+def test_publish_and_resolve_did_note(tmp_path: Path) -> None:
+    key, did = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        path = client.publish_did_note(extra="mailbox:mb-p-tclk-abc")
+        shard, note_key = did_note_path(did)
+        assert path == f"/kv/did-{shard}/{note_key}"
+        note = client.resolve_did_note(did)
+        assert note is not None and note.startswith(did)
+        assert "mailbox:mb-p-tclk-abc" in note
+        assert client.resolve_did_note("did:key:z6Mkunknown") is None
+        mock.notes[("did", did_note_fingerprint(did))] = did
+        mock.notes.pop((f"did-{shard}", note_key))
+        assert client.resolve_did_note(did) == did
+
+
+def test_list_rooms_returns_mock_text(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.post_message("lobby", "hello", nonce="1")
+        assert "lobby" in client.list_rooms()
+
+
+def test_read_events_reads_events_room(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        assert client.read_events(limit=10)["room"] == "events"
+    assert "/r/events" in mock.reads
+
+
 def test_invalid_json_response_is_rejected(tmp_path: Path) -> None:
     key, _ = generate_identity("secret", tmp_path / "identity.pem")
 
@@ -276,6 +383,60 @@ def test_invalid_json_response_is_rejected(tmp_path: Path) -> None:
     with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(TechnocoreError, match="not an object"):
             client.read_room("room")
+
+
+def test_duplicate_message_422_is_distinct(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"error": "duplicate"})
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(DuplicateMessageError, match="duplicate"):
+            client.post_message("room", "body")
+
+
+def test_rate_limited_write_is_not_retried(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(429, headers={"retry-after": "12"})
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(RateLimitedError, match="retry after 12"):
+            client.post_message("room", "body")
+    assert attempts == 1
+
+
+def test_rate_limited_read_is_not_retried(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(429, headers={"retry-after": "30"})
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(RateLimitedError, match="retry after 30"):
+            client.read_room("room")
+    assert attempts == 1
+
+
+def test_nonce_monotonicity_is_enforced_locally(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.post_message("room", "first", nonce="500")
+        with pytest.raises(ValueError, match="greater than 500"):
+            client.post_message("room", "second", nonce="500")
+        with pytest.raises(ValueError, match="greater than 500"):
+            client.post_message("room", "second", nonce="499")
+        client.post_message("room", "second", nonce="501")
+    assert mock.calls == ["/r/room", "/r/room"]
 
 
 def test_official_contribution_proof_roundtrip(tmp_path: Path) -> None:

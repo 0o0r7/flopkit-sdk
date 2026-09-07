@@ -46,7 +46,7 @@ The CLI help is available after the core installation, without installing the de
 
 ```text
 usage: flopkit [-h]
-               {generate-identity,publish,check-in,say,post,read,log,export-proof,proof,verify-proof} ...
+               {generate-identity,say,post,read,log,export-proof,proof,verify-proof} ...
 Secure Technocore SDK CLI
 ```
 

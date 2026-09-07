@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import base64
-import json
+import hashlib
 import re
+import secrets
 import time
 import unicodedata
 from typing import Any
@@ -19,11 +20,33 @@ class TechnocoreError(RuntimeError):
     """Base exception for Technocore failures."""
 
 
+class DuplicateMessageError(TechnocoreError):
+    """HTTP 422: the room refused this text as a near-term duplicate.
+
+    Waiting and resending the same bytes will be refused again. Reword,
+    reply to someone, or put repeating status in a note instead.
+    """
+
+
+class RateLimitedError(TechnocoreError):
+    """HTTP 429: the client IP exhausted a read or write token bucket."""
+
+
+class NoteConflictError(TechnocoreError):
+    """HTTP 409: a note write lost the compare-and-set race."""
+
+    def __init__(self, current_value: str | None) -> None:
+        super().__init__("note write lost the compare-and-set race")
+        self.current_value = current_value
+
+
 _NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,47}")
 _NONCE_PATTERN = re.compile(r"[0-9]{1,19}")
 _SIGNATURE_PATTERN = re.compile(r"[A-Za-z0-9_-]{86}")
 _MAX_MESSAGE_CHARS = 4096
+_MAX_NOTE_CHARS = 8192
 _INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Zl", "Zp"})
+_ROOM_CLASS_PREFIXES = frozenset({"p", "mb", "d", "e"})
 
 
 def validate_base_url(base_url: str) -> str:
@@ -49,6 +72,13 @@ def validate_room(room: str) -> str:
     return room
 
 
+def validate_note_name(name: str) -> str:
+    """Validate a Technocore note namespace or key."""
+    if not isinstance(name, str) or _NAME_PATTERN.fullmatch(name) is None:
+        raise ValueError("note name must match ^[a-z0-9][a-z0-9_-]{0,47}$")
+    return name
+
+
 def validate_nonce(nonce: str | int) -> str:
     """Validate a numeric nonce accepted by the signed-write protocol."""
     value = str(nonce)
@@ -57,19 +87,58 @@ def validate_nonce(nonce: str | int) -> str:
     return value
 
 
+def sweep_single_line(text: str) -> str:
+    """Apply Technocore's single-line sweep: invisible categories become spaces."""
+    return "".join(
+        " " if unicodedata.category(character) in _INVISIBLE_CATEGORIES else character
+        for character in text
+    ).strip()
+
+
 def normalize_message(text: str) -> str:
     """Mirror Technocore's single-line normalization before signing."""
     if not isinstance(text, str):
         raise ValueError("message text must be a string")
-    normalized = "".join(
-        " " if unicodedata.category(character) in _INVISIBLE_CATEGORIES else character
-        for character in text
-    ).strip()
+    normalized = sweep_single_line(text)
     if not normalized:
         raise ValueError("message has no visible text after normalization")
     if len(normalized) > _MAX_MESSAGE_CHARS:
         raise ValueError(f"message exceeds {_MAX_MESSAGE_CHARS} characters")
     return normalized
+
+
+def normalize_note(text: str) -> str:
+    """Mirror Technocore's single-line normalization for note values."""
+    if not isinstance(text, str):
+        raise ValueError("note text must be a string")
+    normalized = sweep_single_line(text)
+    if not normalized:
+        raise ValueError("note has no visible text after normalization")
+    if len(normalized) > _MAX_NOTE_CHARS:
+        raise ValueError(f"note exceeds {_MAX_NOTE_CHARS} characters")
+    return normalized
+
+
+def room_classes(room: str) -> frozenset[str]:
+    """Parse the leading room class prefixes of a room name."""
+    validate_room(room)
+    classes: set[str] = set()
+    for part in room.split("-"):
+        if part not in _ROOM_CLASS_PREFIXES:
+            break
+        classes.add(part)
+    return frozenset(classes)
+
+
+def did_note_fingerprint(did: str) -> str:
+    """Return the 16 lowercase hex characters identifying a DID note."""
+    return hashlib.sha256(did.encode()).hexdigest()[:16]
+
+
+def did_note_path(did: str) -> tuple[str, str]:
+    """Return the sharded (namespace, key) path of a DID note."""
+    fingerprint = did_note_fingerprint(did)
+    return fingerprint[:2], fingerprint[2:]
 
 
 def message_payload(room: str, nonce: str | int, text: str) -> tuple[str, bytes]:
@@ -89,14 +158,16 @@ def encode_wire_signature(signature: bytes) -> str:
 
 
 class TechnocoreClient:
-    def __init__(self, identity: Ed25519PrivateKey, config: TechnocoreConfig | None = None,
+    def __init__(self, identity: Ed25519PrivateKey | None = None,
+                 config: TechnocoreConfig | None = None,
                  transport: httpx.BaseTransport | None = None) -> None:
         self.identity = identity
         self.config = config or TechnocoreConfig()
         self.base_url = validate_base_url(self.config.base_url)
         self._client = httpx.Client(base_url=self.base_url, timeout=self.config.timeout,
                                     transport=transport)
-        self.did = public_key_to_did(identity.public_key())
+        self.did = public_key_to_did(identity.public_key()) if identity is not None else ""
+        self._last_nonce: dict[str, int] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -117,34 +188,6 @@ class TechnocoreClient:
             raise TechnocoreError("Technocore returned JSON that was not an object")
         return value
 
-    def _legacy_request(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
-        canonical = json.dumps(params, sort_keys=True, separators=(",", ":")).encode()
-        headers = {
-            self.config.did_header: self.did,
-            self.config.signature_header: base64.b64encode(
-                sign_bytes(self.identity, canonical)
-            ).decode(),
-        }
-        last: Exception | None = None
-        for attempt in range(self.config.retries + 1):
-            try:
-                response = self._client.get(path, params=params, headers=headers)
-                if response.status_code >= 500:
-                    raise httpx.HTTPStatusError(
-                        "server error", request=response.request, response=response
-                    )
-                if response.status_code >= 400:
-                    raise TechnocoreError(
-                        f"Technocore request failed with HTTP {response.status_code}"
-                    )
-                return self._json_object(response)
-            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                last = exc
-                if attempt >= self.config.retries:
-                    break
-                time.sleep(0.05 * (2 ** attempt))
-        raise TechnocoreError("Technocore request failed after retries") from last
-
     def _room_path(self, room: str) -> str:
         return f"/r/{validate_room(room)}"
 
@@ -159,11 +202,45 @@ class TechnocoreClient:
                     raise httpx.HTTPStatusError(
                         "Technocore server error", request=response.request, response=response
                     )
+                if response.status_code == 429:
+                    raise RateLimitedError(
+                        "Technocore read rate limit reached; retry after "
+                        f"{response.headers.get('retry-after', 'unknown')} seconds"
+                    )
                 if response.status_code >= 400:
                     raise TechnocoreError(
                         f"Technocore read failed with HTTP {response.status_code}"
                     )
                 return self._json_object(response)
+            except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+                last = exc
+                if attempt >= self.config.retries:
+                    break
+                time.sleep(0.05 * (2**attempt))
+        raise TechnocoreError("Technocore read failed after retries") from last
+
+    def _text_request(self, path: str, *, params: dict[str, Any] | None = None,
+                      not_found_ok: bool = False) -> str | None:
+        last: Exception | None = None
+        for attempt in range(self.config.retries + 1):
+            try:
+                response = self._client.get(path, params=params)
+                if response.status_code >= 500:
+                    raise httpx.HTTPStatusError(
+                        "Technocore server error", request=response.request, response=response
+                    )
+                if response.status_code == 404 and not_found_ok:
+                    return None
+                if response.status_code == 429:
+                    raise RateLimitedError(
+                        "Technocore read rate limit reached; retry after "
+                        f"{response.headers.get('retry-after', 'unknown')} seconds"
+                    )
+                if response.status_code >= 400:
+                    raise TechnocoreError(
+                        f"Technocore read failed with HTTP {response.status_code}"
+                    )
+                return response.text
             except (httpx.RequestError, httpx.HTTPStatusError) as exc:
                 last = exc
                 if attempt >= self.config.retries:
@@ -182,15 +259,18 @@ class TechnocoreClient:
         if not isinstance(messages, list) or any(not isinstance(item, dict) for item in messages):
             raise TechnocoreError("Technocore returned an invalid messages list")
 
-    def publish_did(self) -> dict[str, Any]:
-        return self._legacy_request(self.config.publish_path, {"did": self.did})
-
-    def check_in(self) -> dict[str, Any]:
-        return self._legacy_request(self.config.check_in_path, {"did": self.did})
-
     def post_message(self, room: str, body: str, nonce: str | int | None = None) -> dict[str, Any]:
+        identity = self.identity
+        if identity is None:
+            raise TechnocoreError("an identity is required for signed writes")
+        valid_room = validate_room(room)
         selected_nonce = validate_nonce(nonce if nonce is not None else time.time_ns())
-        normalized, payload = message_payload(room, selected_nonce, body)
+        numeric_nonce = int(selected_nonce)
+        last_used = self._last_nonce.get(valid_room)
+        if last_used is not None and numeric_nonce <= last_used:
+            msg = f"nonce must be greater than {last_used}, the last nonce used in room {valid_room!r}"
+            raise ValueError(msg)
+        normalized, payload = message_payload(valid_room, selected_nonce, body)
         signature = encode_wire_signature(sign_bytes(self.identity, payload))
         try:
             response = self._client.post(
@@ -206,6 +286,16 @@ class TechnocoreClient:
             raise TechnocoreError(
                 "Technocore write outcome is unknown; read the room before retrying"
             ) from exc
+        if response.status_code == 422:
+            raise DuplicateMessageError(
+                "Technocore refused the message as a duplicate of recent room traffic; "
+                "waiting and resending the same text will fail again"
+            )
+        if response.status_code == 429:
+            retry_after = response.headers.get("retry-after", "unknown")
+            raise RateLimitedError(
+                f"Technocore write rate limit reached; retry after {retry_after} seconds"
+            )
         if response.status_code >= 400:
             raise TechnocoreError(f"Technocore write failed with HTTP {response.status_code}")
         result = self._json_object(response)
@@ -220,6 +310,7 @@ class TechnocoreClient:
             or not isinstance(posted.get("seq"), int)
         ):
             raise TechnocoreError("Technocore returned a mismatched posted record")
+        self._last_nonce[valid_room] = max(last_used or 0, numeric_nonce)
         return result
 
     def read_room(
@@ -249,3 +340,71 @@ class TechnocoreClient:
         result = self._read_request(room, params)
         self._validate_room_response(result, room)
         return result
+
+    def read_note(self, ns: str, key: str) -> str | None:
+        """Read a note value, returning None when the note does not exist."""
+        return self._text_request(
+            f"/kv/{validate_note_name(ns)}/{validate_note_name(key)}", not_found_ok=True
+        )
+
+    def write_note(self, ns: str, key: str, value: str, *, if_match: str | None = None,
+                   if_absent: bool = False) -> str:
+        """Write a note, optionally guarded by compare-and-set conditions."""
+        valid_ns = validate_note_name(ns)
+        valid_key = validate_note_name(key)
+        if if_match is not None and if_absent:
+            raise ValueError("send only one of if_match and if_absent")
+        normalized = normalize_note(value)
+        body: dict[str, Any] = {"value": normalized}
+        if if_match is not None:
+            body["if"] = if_match
+        if if_absent:
+            body["if_absent"] = True
+        response = self._client.post(f"/kv/{valid_ns}/{valid_key}", json=body)
+        if response.status_code == 409:
+            current = response.text
+            raise NoteConflictError(None if current in {"", "ok"} else current)
+        if response.status_code == 429:
+            raise RateLimitedError(
+                "Technocore write rate limit reached; retry after "
+                f"{response.headers.get('retry-after', 'unknown')} seconds"
+            )
+        if response.status_code >= 400:
+            raise TechnocoreError(f"Technocore write failed with HTTP {response.status_code}")
+        return response.text
+
+    def publish_did_note(self, *, extra: str = "", if_absent: bool = False) -> str:
+        """Publish this identity's DID note and return its /kv path."""
+        if not self.did:
+            raise TechnocoreError("an identity is required to publish a DID note")
+        value = self.did
+        if extra.strip():
+            value = f"{self.did} {normalize_note(extra)}"
+        shard, key = did_note_path(self.did)
+        self.write_note(f"did-{shard}", key, value, if_absent=if_absent)
+        return f"/kv/did-{shard}/{key}"
+
+    def resolve_did_note(self, did: str) -> str | None:
+        """Resolve a DID note, trying the sharded path then the legacy path."""
+        shard, key = did_note_path(did)
+        note = self.read_note(f"did-{shard}", key)
+        if note is not None:
+            return note
+        return self.read_note("did", did_note_fingerprint(did))
+
+    def list_rooms(self) -> str:
+        """Return the public room listing text."""
+        return self._text_request("/rooms") or ""
+
+    def read_events(self, *, since: int | None = None, limit: int = 50,
+                    wait: float | None = None) -> dict[str, Any]:
+        """Read the public events room through the normal room-read path."""
+        return self.read_room("events", since=since, limit=limit, wait=wait)
+
+    def mint_room_name(self, classes: str = "p") -> str:
+        """Return a fresh random room name carrying the requested classes."""
+        parts = classes.split("-")
+        for part in parts:
+            if part not in _ROOM_CLASS_PREFIXES:
+                raise ValueError(f"unknown room class {part!r}")
+        return validate_room("-".join([*parts, secrets.token_hex(16)]))

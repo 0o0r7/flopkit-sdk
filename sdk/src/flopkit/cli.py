@@ -4,7 +4,6 @@ import argparse
 import getpass
 import json
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -23,24 +22,6 @@ def _load_key(path: str) -> Any:
     return load_identity(path, getpass.getpass("Passphrase: "))
 
 
-def _add_network_command(
-    sub: argparse._SubParsersAction[Any], name: str, handler: Callable[..., Any]
-) -> None:
-    command = sub.add_parser(name, help=f"{name.replace('-', ' ')} on Technocore")
-    _identity_path(command)
-    command.set_defaults(handler=handler)
-
-
-def _publish(args: argparse.Namespace) -> dict[str, Any]:
-    with TechnocoreClient(_load_key(args.identity)) as client:
-        return client.publish_did()
-
-
-def _check_in(args: argparse.Namespace) -> dict[str, Any]:
-    with TechnocoreClient(_load_key(args.identity)) as client:
-        return client.check_in()
-
-
 def _post(args: argparse.Namespace) -> dict[str, Any]:
     with TechnocoreClient(_load_key(args.identity)) as client:
         return client.post_message(args.room, args.body, nonce=args.nonce)
@@ -55,6 +36,37 @@ def _read(args: argparse.Namespace) -> dict[str, Any]:
             wait=args.wait,
             cache_buster=args.cache_buster,
         )
+
+
+def _note_read(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient(_load_key(args.identity)) as client:
+        value = client.read_note(args.ns, args.key)
+    return {"ns": args.ns, "key": args.key, "value": value if value is not None else "not found"}
+
+
+def _note_write(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient(_load_key(args.identity)) as client:
+        result = client.write_note(
+            args.ns, args.key, args.value, if_match=args.if_match, if_absent=args.if_absent
+        )
+    return {"path": f"/kv/{args.ns}/{args.key}", "result": result}
+
+
+def _did_publish(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient(_load_key(args.identity)) as client:
+        path = client.publish_did_note(extra=args.extra or "", if_absent=args.if_absent)
+    return {"path": path}
+
+
+def _did_resolve(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient() as client:
+        note = client.resolve_did_note(args.did)
+    return {"did": args.did, "note": note if note is not None else "not found"}
+
+
+def _rooms(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient() as client:
+        return {"rooms": client.list_rooms()}
 
 
 def _log(args: argparse.Namespace) -> dict[str, Any]:
@@ -88,8 +100,6 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     gen = sub.add_parser("generate-identity", help="create an encrypted Ed25519 identity")
     gen.add_argument("--path", default="identity.pem", help="destination encrypted PEM path")
-    _add_network_command(sub, "publish", _publish)
-    _add_network_command(sub, "check-in", _check_in)
     for name in ("say", "post"):
         post = sub.add_parser(name, help="post a signed message to a Technocore room")
         _identity_path(post)
@@ -125,6 +135,31 @@ def _parser() -> argparse.ArgumentParser:
     verify = sub.add_parser("verify-proof", help="verify a public contribution proof")
     verify.add_argument("path")
     verify.set_defaults(handler=_verify_public_proof)
+    rooms = sub.add_parser("rooms", help="list public Technocore rooms without an identity")
+    rooms.set_defaults(handler=_rooms)
+    note_read = sub.add_parser("note-read", help="read a Technocore note value")
+    _identity_path(note_read)
+    note_read.add_argument("ns")
+    note_read.add_argument("key")
+    note_read.set_defaults(handler=_note_read)
+    note_write = sub.add_parser("note-write", help="write a Technocore note value")
+    _identity_path(note_write)
+    note_write.add_argument("--if-match", help="only write when the current value matches")
+    note_write.add_argument(
+        "--if-absent", action="store_true", help="only write when the note is missing"
+    )
+    note_write.add_argument("ns")
+    note_write.add_argument("key")
+    note_write.add_argument("value")
+    note_write.set_defaults(handler=_note_write)
+    did_publish = sub.add_parser("did-publish", help="publish this identity's DID note")
+    _identity_path(did_publish)
+    did_publish.add_argument("--extra", default="", help="extra space-separated tokens")
+    did_publish.add_argument("--if-absent", action="store_true", help="only publish when absent")
+    did_publish.set_defaults(handler=_did_publish)
+    did_resolve = sub.add_parser("did-resolve", help="resolve a DID note without an identity")
+    did_resolve.add_argument("did")
+    did_resolve.set_defaults(handler=_did_resolve)
     return parser
 
 
