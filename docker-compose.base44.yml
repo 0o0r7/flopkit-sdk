@@ -1,0 +1,12 @@
+services:
+  docs:
+    image: python:3.12-slim
+    working_dir: /app/sdk
+    volumes:
+      - ./:/app
+    command: >
+      sh -c "pip install --no-cache-dir -e '.[dev]' && mkdocs serve --dev-addr 0.0.0.0:3000 --config-file mkdocs.yml"
+    ports:
+      - "3000:3000"
+    environment:
+      - PYTHONUNBUFFERED=1
