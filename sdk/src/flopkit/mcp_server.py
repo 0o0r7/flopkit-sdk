@@ -8,6 +8,7 @@ from typing import Any
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from mcp.server.fastmcp import FastMCP
 
+from .delegation import DelegationManager
 from .identity import (
     generate_identity as create_identity,
 )
@@ -17,6 +18,7 @@ from .identity import (
     verify_signature,
 )
 from .ledger import ContributionLedger
+from .tclk import TCLKManager
 from .technocore import TechnocoreClient
 
 mcp = FastMCP("flopkit")
@@ -156,6 +158,183 @@ def export_proof(path: str) -> dict[str, Any]:
     """Export and verify proof; never paste wallet seed phrases into inputs."""
     ledger = ContributionLedger(os.getenv("FLOPKIT_LEDGER", "contributions.ledger"), _key())
     return ledger.export_proof(path)
+
+
+# --- TCLK MCP tools ---
+
+
+@mcp.tool()
+def tclk_offer(
+    role: str, amount: str, asset: str, lock: str,
+    rails: list[str], claim_by_ms: int, refund_after_ms: int, expires_ms: int,
+    payment_key: str | None = None, job_id: str | None = None, job_proto: str | None = None,
+) -> dict[str, Any]:
+    """Post a TCLK/1 offer with full spec fields to tclk-offers."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        job = {"id": job_id, "proto": job_proto} if job_id else None
+        return mgr.post_offer(
+            role=role, amount=amount, asset=asset, lock=lock, rails=rails,
+            claim_by_ms=claim_by_ms, refund_after_ms=refund_after_ms,
+            expires_ms=expires_ms, payment_key=payment_key, job=job,
+        )
+
+
+@mcp.tool()
+def tclk_accept(
+    offer_nonce: str, statement: str, payment_key: str | None = None,
+) -> dict[str, Any]:
+    """Accept a TCLK offer by its nonce. Reads tclk-offers to find the offer frame."""
+    with TechnocoreClient(_key()) as client:
+        import json
+        room_data = client.read_room("tclk-offers", limit=200)
+        offer_frame = None
+        for msg in room_data.get("messages", []):
+            text = msg.get("text", "")
+            if text.startswith("tclk1 "):
+                frame = json.loads(text[6:])
+                if frame.get("nonce") == offer_nonce and frame.get("type") == "offer":
+                    offer_frame = frame
+                    break
+        if offer_frame is None:
+            raise ValueError(f"offer {offer_nonce!r} not found in tclk-offers")
+        mgr = TCLKManager(client)
+        return mgr.post_accept(offer=offer_frame, statement=statement, payment_key=payment_key)
+
+
+@mcp.tool()
+def tclk_lock(contract_id: str, rail: str, ref: str,
+               presig: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Post a TCLK lock frame to the derived deal room."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        nonce = mgr.post_lock(contract_id=contract_id, rail=rail, ref=ref, presig=presig)
+    return {"type": "lock", "nonce": nonce}
+
+
+@mcp.tool()
+def tclk_reveal(contract_id: str, secret: str, ref: str | None = None) -> dict[str, Any]:
+    """Post a TCLK reveal frame to the derived deal room."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        nonce = mgr.post_reveal(contract_id=contract_id, secret=secret, ref=ref)
+    return {"type": "reveal", "nonce": nonce}
+
+
+@mcp.tool()
+def tclk_refund(contract_id: str, ref: str | None = None,
+                reason: str | None = None) -> dict[str, Any]:
+    """Post a TCLK refund frame to the derived deal room."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        nonce = mgr.post_refund(contract_id=contract_id, ref=ref, reason=reason)
+    return {"type": "refund", "nonce": nonce}
+
+
+@mcp.tool()
+def tclk_cancel(contract_id: str, reason: str | None = None) -> dict[str, Any]:
+    """Cancel a TCLK deal before any lock exists."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        nonce = mgr.post_cancel(contract_id=contract_id, reason=reason)
+    return {"type": "cancel", "nonce": nonce}
+
+
+@mcp.tool()
+def tclk_heartbeat(contract_id: str, note: str | None = None) -> dict[str, Any]:
+    """Post a TCLK liveness heartbeat while a contract is accepted or locked."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        nonce = mgr.post_heartbeat(contract_id=contract_id, note=note)
+    return {"type": "heartbeat", "nonce": nonce}
+
+
+@mcp.tool()
+def tclk_receipt(
+    contract_id: str, outcome: str,
+    rail: str | None = None, ref: str | None = None,
+) -> dict[str, Any]:
+    """Post a TCLK post-terminal receipt acknowledgment."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        nonce = mgr.post_receipt(contract_id=contract_id, outcome=outcome, rail=rail, ref=ref)
+    return {"type": "receipt", "nonce": nonce}
+
+
+@mcp.tool()
+def tclk_read_deal_status(contract_id: str) -> dict[str, Any]:
+    """Read the state pointer note for a TCLK contract."""
+    with TechnocoreClient() as client:
+        mgr = TCLKManager(client)
+        status = mgr.read_deal_status(contract_id)
+    return {"contract": contract_id, "status": status if status is not None else "not found"}
+
+
+@mcp.tool()
+def tclk_fold_transcript(room: str, limit: int = 200) -> dict[str, Any]:
+    """Fold a room transcript into TCLK contract states."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        result = mgr.fold_room(room, limit=limit)
+    return {
+        "contracts": {
+            cid: {"state": c.state.value, "amount": c.amount, "asset": c.asset}
+            for cid, c in result.contracts.items()
+        },
+        "offers": result.offers,
+        "malformed_count": len(result.malformed),
+        "rejected_count": len(result.rejected),
+    }
+
+
+@mcp.tool()
+def tclk_list_offers(limit: int = 200) -> dict[str, Any]:
+    """Read tclk-offers and parse active offers."""
+    with TechnocoreClient() as client:
+        mgr = TCLKManager(client)
+        result = mgr.fold_room("tclk-offers", limit=limit)
+    return {"offers": result.offers, "count": len(result.offers)}
+
+
+@mcp.tool()
+def advertise_tclk_capability(rails: list[str]) -> dict[str, Any]:
+    """Add the tclk1 capability token to this identity's DID note."""
+    with TechnocoreClient(_key()) as client:
+        mgr = TCLKManager(client)
+        path = mgr.advertise_capability(rails)
+    return {"path": path, "rails": rails}
+
+
+# --- Delegation MCP tools ---
+
+
+@mcp.tool()
+def delegate(agent_did: str, scope: str, expires_ms: int) -> dict[str, Any]:
+    """Delegate signing authority to an agent DID."""
+    with TechnocoreClient(_key()) as client:
+        mgr = DelegationManager(client)
+        result = mgr.create_delegate(agent_did, scope, expires_ms)
+    return {"type": "delegate", "nonce": result["nonce"], "agent_did": result["agent_did"]}
+
+
+@mcp.tool()
+def verify_delegation(issuer_did: str, agent_did: str) -> dict[str, Any]:
+    """Verify whether an agent has a valid delegation from an issuer."""
+    with TechnocoreClient() as client:
+        mgr = DelegationManager(client)
+        result = mgr.verify_delegate(issuer_did, agent_did)
+    if result is None:
+        return {"valid": False, "reason": "no delegation found"}
+    return result  # type: ignore[return-value]
+
+
+@mcp.tool()
+def revoke_delegation(agent_did: str) -> dict[str, Any]:
+    """Revoke a previously granted delegation."""
+    with TechnocoreClient(_key()) as client:
+        mgr = DelegationManager(client)
+        result = mgr.revoke_delegate(agent_did)
+    return {"type": "revoke", "nonce": result["nonce"], "agent_did": result["agent_did"]}
 
 
 if __name__ == "__main__":
