@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -21,6 +22,7 @@ from flopkit.proofs import (
     verify_contribution_proof,
     write_proof,
 )
+from flopkit.tclk import TCLKManager
 from flopkit.technocore import (
     DuplicateMessageError,
     NoteConflictError,
@@ -39,6 +41,8 @@ from flopkit.technocore import (
     validate_room,
 )
 from flopkit.wizard import run as run_wizard
+
+# --- Identity tests ---
 
 
 def test_identity_roundtrip(tmp_path: Path) -> None:
@@ -77,6 +81,9 @@ def test_wrong_passphrase(tmp_path: Path) -> None:
         raise AssertionError("wrong passphrase accepted")
 
 
+# --- Ledger tests ---
+
+
 def test_ledger_and_tamper_detection(tmp_path: Path) -> None:
     key, _ = generate_identity("secret", tmp_path / "key.pem")
     ledger_path = tmp_path / "events.ledger"
@@ -105,6 +112,9 @@ def test_malformed_ledger_signature_is_invalid(tmp_path: Path) -> None:
         + "\n"
     )
     assert ledger.export_proof(tmp_path / "bad.json")["valid"] is False
+
+
+# --- Technocore client tests ---
 
 
 def test_technocore_flow(tmp_path: Path) -> None:
@@ -171,6 +181,9 @@ def test_4xx_is_not_retried(tmp_path: Path) -> None:
         with pytest.raises(TechnocoreError, match="HTTP 400"):
             client.read_room("room")
     assert attempts == 1
+
+
+# --- Protocol helper tests ---
 
 
 def test_protocol_helpers_validate_and_normalize() -> None:
@@ -275,6 +288,9 @@ def test_read_options_and_validation(tmp_path: Path) -> None:
     assert seen == {"format": "json", "limit": "10", "since": "2", "wait": "1", "n": "3"}
 
 
+# --- Note tests ---
+
+
 def test_note_roundtrip_and_missing_note(tmp_path: Path) -> None:
     key, _ = generate_identity("secret", tmp_path / "identity.pem")
     mock = MockTechnocore()
@@ -311,6 +327,9 @@ def test_normalize_note_sweeps_and_bounds() -> None:
         normalize_note("\n\t")
     with pytest.raises(ValueError):
         normalize_note("x" * 8193)
+
+
+# --- Room and DID tests ---
 
 
 def test_room_classes_parse_prefixes() -> None:
@@ -372,6 +391,9 @@ def test_read_events_reads_events_room(tmp_path: Path) -> None:
     with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
         assert client.read_events(limit=10)["room"] == "events"
     assert "/r/events" in mock.reads
+
+
+# --- Error handling tests ---
 
 
 def test_invalid_json_response_is_rejected(tmp_path: Path) -> None:
@@ -439,6 +461,9 @@ def test_nonce_monotonicity_is_enforced_locally(tmp_path: Path) -> None:
     assert mock.calls == ["/r/room", "/r/room"]
 
 
+# --- Contribution proof tests ---
+
+
 def test_official_contribution_proof_roundtrip(tmp_path: Path) -> None:
     key, _ = generate_identity("secret", tmp_path / "identity.pem")
     commit = "a" * 40
@@ -454,6 +479,9 @@ def test_official_contribution_proof_roundtrip(tmp_path: Path) -> None:
         verify_contribution_proof(proof)
 
 
+# --- Wizard tests (P0: fixed to use injectable I/O) ---
+
+
 def test_interactive_menu_can_exit_without_side_effects() -> None:
     output: list[str] = []
     choices = iter(["5"])
@@ -465,8 +493,8 @@ def test_interactive_menu_can_exit_without_side_effects() -> None:
 def test_interactive_menu_creates_and_shows_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    identity = tmp_path / "identity.pem"
     monkeypatch.setattr("flopkit.wizard.getpass.getpass", lambda _prompt: "wizard-secret")
+    identity = tmp_path / "identity.pem"
     choices = iter(["1", str(identity), "2", str(identity), "5"])
     output: list[str] = []
     run_wizard(lambda _prompt: next(choices), output.append)
@@ -484,4 +512,357 @@ def test_interactive_menu_can_cancel_message(
     output: list[str] = []
     run_wizard(lambda _prompt: next(choices), output.append)
     assert "Cancelled." in output
+    assert not identity.exists()
+
+
+# --- GET signed-write lane tests (P1) ---
+
+
+def test_get_signed_write_lane(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        result = client.post_message_get("room", "hello world", nonce="100")
+    assert result["posted"]["text"] == "hello world"
+    assert result["posted"]["nonce"] == "100"
+    assert mock.calls == ["/r/room/say-signed/"] or any("say-signed" in c for c in mock.calls)
+
+
+def test_get_signed_write_nonce_monotonicity(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.post_message_get("room", "first", nonce="500")
+        with pytest.raises(ValueError, match="greater than 500"):
+            client.post_message_get("room", "second", nonce="500")
+
+
+# --- GET note-write lane tests (P1) ---
+
+
+def test_get_note_write_lane(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        result = client.write_note_get("notes", "key1", "test value")
+        assert result == "ok"
+        assert client.read_note("notes", "key1") == "test value"
+
+
+def test_get_note_write_with_if_absent(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.write_note_get("notes", "key1", "v1")
+        with pytest.raises(NoteConflictError):
+            client.write_note_get("notes", "key1", "v2", if_absent=True)
+
+
+# --- Text read test (P1) ---
+
+
+def test_read_room_text(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.post_message("room", "hello", nonce="1")
+        text = client.read_room_text("room")
+        assert "hello" in text or "room" in text
+
+
+# --- TCLK tests (P2) ---
+
+
+def test_tclk_offer(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        manager = TCLKManager(client)
+        nonce = manager.post_offer("100", "FLOP", ["flop-htlc"])
+    assert len(nonce) == 16  # 8 bytes hex
+    assert any("tclk1" in msg["text"] for msg in mock.messages["tclk-offers"])
+
+
+def test_tclk_full_state_machine(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        manager = TCLKManager(client)
+        offer_nonce = manager.post_offer("100", "FLOP", ["flop-htlc"])
+        accept_nonce = manager.post_accept(offer_nonce)
+        secret = TCLKManager.generate_secret()
+        hashlock = TCLKManager.generate_hashlock(secret)
+        lock_nonce = manager.post_lock(accept_nonce, hashlock)
+        manager.post_reveal(lock_nonce, secret)
+        manager.post_refund(lock_nonce)
+    messages = mock.messages["tclk-offers"]
+    types = [json.loads(m["text"].removeprefix("tclk1 "))["type"] for m in messages]
+    assert types == ["offer", "accept", "lock", "reveal", "refund"]
+
+
+def test_tclk_hashlock_and_secret() -> None:
+    secret = TCLKManager.generate_secret()
+    assert len(secret) == 64  # 32 bytes hex
+    hashlock = TCLKManager.generate_hashlock("test-secret")
+    assert re.fullmatch(r"[0-9a-f]{64}", hashlock)
+
+
+# --- Ecosystem helper tests (P3) ---
+
+
+def test_parse_rooms(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.post_message("lobby", "hello", nonce="1")
+        client.post_message("technocore", "world", nonce="1")
+        rooms = client.parse_rooms()
+    assert len(rooms) >= 2
+    assert any(r["room"] == "lobby" for r in rooms)
+    assert any(r["room"] == "technocore" for r in rooms)
+
+
+def test_parse_budget_footer() -> None:
+    text_with = "# budget: 15 of 25 reads left\nsome content"
+    result = TechnocoreClient.parse_budget(text_with)
+    assert result == {"remaining": 15, "total": 25}
+
+    text_without = "just some content"
+    assert TechnocoreClient.parse_budget(text_without) is None
+
+
+def test_setup_mailbox(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        room = client.setup_mailbox()
+    assert room.startswith("mb-p-")
+    # DID note should contain mailbox reference
+    shard, note_key = did_note_path(client.did)
+    note = mock.notes.get((f"did-{shard}", note_key))
+    assert note is not None and f"mailbox:{room}" in note
+
+
+def test_long_poll(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.post_message("room", "hello", nonce="1")
+        result = client.long_poll("room", since=0, wait=1)
+    assert result["room"] == "room"
+    assert isinstance(result["messages"], list)
+
+
+# --- Package exports test (P2) ---
+
+
+def test_package_exports() -> None:
+    import flopkit
+
+    expected = {
+        "ContributionLedger", "DuplicateMessageError", "NoteConflictError",
+        "RateLimitedError", "TCLKManager", "TechnocoreClient", "TechnocoreConfig",
+        "TechnocoreError", "create_contribution_proof", "did_to_public_key",
+        "generate_identity", "public_key_to_did", "sign_bytes",
+        "verify_contribution_proof", "verify_signature", "write_proof",
+    }
+    assert expected <= set(flopkit.__all__)
+    for name in expected:
+        assert hasattr(flopkit, name)
+
+
+# --- Coverage: GET lane error paths ---
+
+
+def test_get_signed_write_422_duplicate(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"error": "duplicate"})
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(DuplicateMessageError, match="duplicate"):
+            client.post_message_get("room", "body")
+
+
+def test_get_signed_write_429_rate_limited(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"retry-after": "5"})
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(RateLimitedError, match="retry after 5"):
+            client.post_message_get("room", "body")
+
+
+def test_get_signed_write_400_error(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(400)
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(TechnocoreError, match="HTTP 400"):
+            client.post_message_get("room", "body")
+
+
+def test_get_signed_write_timeout(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timeout")
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(TechnocoreError, match="outcome is unknown"):
+            client.post_message_get("room", "body")
+
+
+def test_get_signed_write_no_identity(tmp_path: Path) -> None:
+    with TechnocoreClient() as client:
+        with pytest.raises(TechnocoreError, match="identity is required"):
+            client.post_message_get("room", "body")
+
+
+def test_get_note_write_409_conflict(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        client.write_note_get("ns", "key", "v1")
+        with pytest.raises(NoteConflictError):
+            client.write_note_get("ns", "key", "v2", if_absent=True)
+
+
+def test_get_note_write_400_error(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(400)
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(TechnocoreError, match="HTTP 400"):
+            client.write_note_get("ns", "key", "value")
+
+
+def test_get_note_write_rejects_if_match_and_if_absent(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    with TechnocoreClient(key, transport=httpx.MockTransport(MockTechnocore())) as client:
+        with pytest.raises(ValueError, match="only one of if_match and if_absent"):
+            client.write_note_get("ns", "key", "value", if_match="x", if_absent=True)
+
+
+def test_read_room_text_validation(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    with TechnocoreClient(key, transport=httpx.MockTransport(MockTechnocore())) as client:
+        for kwargs in ({"limit": 0}, {"since": -1}, {"wait": 11}, {"cache_buster": -1}):
+            with pytest.raises(ValueError):
+                client.read_room_text("room", **kwargs)
+
+
+def test_parse_rooms_empty(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+    mock = MockTechnocore()
+    with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
+        rooms = client.parse_rooms()
+    assert rooms == []
+
+
+def test_setup_mailbox_no_identity() -> None:
+    with TechnocoreClient() as client:
+        with pytest.raises(TechnocoreError, match="identity is required"):
+            client.setup_mailbox()
+
+
+def test_post_message_get_mismatched_response(tmp_path: Path) -> None:
+    key, _ = generate_identity("secret", tmp_path / "identity.pem")
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "room": "room", "count": 1, "first_seq": 1, "last_seq": 1,
+                "generation": 0,
+                "posted": {"seq": 1, "from": "did:key:wrong", "nonce": "1", "text": "body"},
+                "messages": [],
+            },
+        )
+
+    with TechnocoreClient(key, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(TechnocoreError, match="mismatched"):
+            client.post_message_get("room", "body", nonce="1")
+
+
+# --- Coverage: wizard interactive paths ---
+
+
+def test_wizard_list_rooms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mock = MockTechnocore()
+
+    class MockedClient(TechnocoreClient):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs.setdefault("transport", httpx.MockTransport(mock))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("flopkit.wizard.TechnocoreClient", MockedClient)
+    mock.messages["lobby"] = []
+    output: list[str] = []
+    choices = iter(["4", "5"])
+    run_wizard(lambda _p: next(choices), output.append)
+    assert any("lobby" in line for line in output)
+
+
+def test_wizard_post_message_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = tmp_path / "identity.pem"
+    key, did = generate_identity("test-pass", identity)
+    mock = MockTechnocore()
+
+    class MockedClient(TechnocoreClient):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs.setdefault("transport", httpx.MockTransport(mock))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("flopkit.wizard.TechnocoreClient", MockedClient)
+    monkeypatch.setattr("flopkit.wizard.getpass.getpass", lambda _p: "test-pass")
+    output: list[str] = []
+    choices = iter(["3", str(identity), "technocore", "hello world", "y", "5"])
+    run_wizard(lambda _p: next(choices), output.append)
+    assert any("sent" in line.lower() for line in output)
+
+
+def test_wizard_create_identity_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = tmp_path / "identity.pem"
+    identity.write_text("existing")
+    output: list[str] = []
+    choices = iter(["1", str(identity), "5"])
+    run_wizard(lambda _p: next(choices), output.append)
+    assert any("already exists" in line for line in output)
+
+
+def test_wizard_show_did_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("flopkit.wizard.getpass.getpass", lambda _p: "wrong")
+    identity = tmp_path / "nonexistent.pem"
+    output: list[str] = []
+    choices = iter(["2", str(identity), "5"])
+    run_wizard(lambda _p: next(choices), output.append)
+    assert any("Could not load" in line or "Error" in line for line in output)
+
+
+def test_wizard_passphrase_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = tmp_path / "identity.pem"
+    answers = iter(["correct", "wrong"])
+    monkeypatch.setattr("flopkit.wizard.getpass.getpass", lambda _p: next(answers))
+    output: list[str] = []
+    choices = iter(["1", str(identity), "5"])
+    run_wizard(lambda _p: next(choices), output.append)
+    assert any("do not match" in line for line in output)
     assert not identity.exists()

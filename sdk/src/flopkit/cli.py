@@ -1,3 +1,4 @@
+"""Command-line interface for the flopkit SDK."""
 from __future__ import annotations
 
 import argparse
@@ -10,6 +11,7 @@ from typing import Any
 from .identity import generate_identity, load_identity
 from .ledger import ContributionLedger
 from .proofs import create_contribution_proof, verify_contribution_proof, write_proof
+from .tclk import TCLKManager
 from .technocore import TechnocoreClient
 from .wizard import run as run_wizard
 
@@ -36,6 +38,17 @@ def _read(args: argparse.Namespace) -> dict[str, Any]:
             wait=args.wait,
             cache_buster=args.cache_buster,
         )
+
+
+def _events(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient() as client:
+        return client.read_events(since=args.since, limit=args.limit)
+
+
+def _mint_room(args: argparse.Namespace) -> dict[str, str]:
+    with TechnocoreClient() as client:
+        name = client.mint_room_name(args.classes)
+    return {"room": name}
 
 
 def _note_read(args: argparse.Namespace) -> dict[str, Any]:
@@ -95,6 +108,41 @@ def _verify_public_proof(args: argparse.Namespace) -> dict[str, Any]:
     return {"path": str(args.path), "valid": True}
 
 
+def _tclk_offer(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient(_load_key(args.identity)) as client:
+        manager = TCLKManager(client)
+        nonce = manager.post_offer(args.amount, args.asset, args.rails)
+    return {"type": "offer", "nonce": nonce}
+
+
+def _tclk_accept(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient(_load_key(args.identity)) as client:
+        manager = TCLKManager(client)
+        nonce = manager.post_accept(args.offer_nonce)
+    return {"type": "accept", "nonce": nonce}
+
+
+def _tclk_lock(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient(_load_key(args.identity)) as client:
+        manager = TCLKManager(client)
+        nonce = manager.post_lock(args.accept_nonce, args.hashlock)
+    return {"type": "lock", "nonce": nonce}
+
+
+def _tclk_reveal(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient(_load_key(args.identity)) as client:
+        manager = TCLKManager(client)
+        nonce = manager.post_reveal(args.lock_nonce, args.secret)
+    return {"type": "reveal", "nonce": nonce}
+
+
+def _tclk_refund(args: argparse.Namespace) -> dict[str, Any]:
+    with TechnocoreClient(_load_key(args.identity)) as client:
+        manager = TCLKManager(client)
+        nonce = manager.post_refund(args.lock_nonce)
+    return {"type": "refund", "nonce": nonce}
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="flopkit", description="Secure Technocore SDK CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -115,6 +163,13 @@ def _parser() -> argparse.ArgumentParser:
     read.add_argument("--wait", type=float)
     read.add_argument("--cache-buster", type=int)
     read.set_defaults(handler=_read)
+    events = sub.add_parser("events", help="read the public events/discovery stream")
+    events.add_argument("--since", type=int)
+    events.add_argument("--limit", type=int, default=50)
+    events.set_defaults(handler=_events)
+    mint = sub.add_parser("mint-room", help="mint a fresh random room name")
+    mint.add_argument("--classes", default="p", help="room class prefixes (e.g. 'p', 'mb-p')")
+    mint.set_defaults(handler=_mint_room)
     log = sub.add_parser("log", help="append a signed contribution event")
     _identity_path(log)
     log.add_argument("--ledger", default="contributions.ledger")
@@ -160,6 +215,32 @@ def _parser() -> argparse.ArgumentParser:
     did_resolve = sub.add_parser("did-resolve", help="resolve a DID note without an identity")
     did_resolve.add_argument("did")
     did_resolve.set_defaults(handler=_did_resolve)
+    # TCLK subcommands
+    tclk_offer = sub.add_parser("tclk-offer", help="post a TCLK trade offer")
+    _identity_path(tclk_offer)
+    tclk_offer.add_argument("amount", help="amount of the asset being offered")
+    tclk_offer.add_argument("asset", help="asset identifier (e.g. FLOP)")
+    tclk_offer.add_argument("--rails", nargs="+", default=["flop-htlc"],
+                            help="settlement rail identifiers")
+    tclk_offer.set_defaults(handler=_tclk_offer)
+    tclk_accept = sub.add_parser("tclk-accept", help="accept a TCLK offer")
+    _identity_path(tclk_accept)
+    tclk_accept.add_argument("offer_nonce", help="nonce of the offer to accept")
+    tclk_accept.set_defaults(handler=_tclk_accept)
+    tclk_lock = sub.add_parser("tclk-lock", help="post a TCLK lock with a hashlock")
+    _identity_path(tclk_lock)
+    tclk_lock.add_argument("accept_nonce", help="nonce of the acceptance to lock")
+    tclk_lock.add_argument("hashlock", help="SHA-256 hash of the secret preimage")
+    tclk_lock.set_defaults(handler=_tclk_lock)
+    tclk_reveal = sub.add_parser("tclk-reveal", help="reveal a TCLK preimage")
+    _identity_path(tclk_reveal)
+    tclk_reveal.add_argument("lock_nonce", help="nonce of the lock to reveal")
+    tclk_reveal.add_argument("secret", help="preimage matching the lock's hashlock")
+    tclk_reveal.set_defaults(handler=_tclk_reveal)
+    tclk_refund = sub.add_parser("tclk-refund", help="post a TCLK refund claim")
+    _identity_path(tclk_refund)
+    tclk_refund.add_argument("lock_nonce", help="nonce of the lock to refund")
+    tclk_refund.set_defaults(handler=_tclk_refund)
     return parser
 
 

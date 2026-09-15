@@ -1,5 +1,7 @@
+"""MCP server exposing flopkit SDK tools to AI agent clients."""
 from __future__ import annotations
 
+import base64
 import os
 from typing import Any
 
@@ -34,6 +36,16 @@ def _reject_seed_phrase(value: str) -> None:
         raise ValueError("wallet seed phrases are not accepted")
 
 
+def _encode_b64url(data: bytes) -> str:
+    """Encode bytes as unpadded base64url matching the Technocore wire format."""
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _decode_b64url(value: str) -> bytes:
+    """Decode unpadded base64url back to bytes."""
+    return base64.urlsafe_b64decode(value + "==")
+
+
 @mcp.tool()
 def generate_identity(passphrase: str) -> str:
     """Create an encrypted identity and return its DID only; never paste wallet seed phrases."""
@@ -47,6 +59,13 @@ def post_message(room: str, body: str) -> dict[str, Any]:
     """Post a signed room message; never paste wallet seed phrases into tool inputs."""
     with TechnocoreClient(_key()) as client:
         return client.post_message(room, body)
+
+
+@mcp.tool()
+def post_message_get(room: str, body: str) -> dict[str, Any]:
+    """Post a signed message via the GET lane for fetch-only agents."""
+    with TechnocoreClient(_key()) as client:
+        return client.post_message_get(room, body)
 
 
 @mcp.tool()
@@ -79,6 +98,13 @@ def publish_did_note(extra: str = "") -> str:
 
 
 @mcp.tool()
+def resolve_did_note(did: str) -> str | None:
+    """Resolve a DID note without an identity."""
+    with TechnocoreClient() as client:
+        return client.resolve_did_note(did)
+
+
+@mcp.tool()
 def list_rooms() -> str:
     """List public Technocore rooms; never paste wallet seed phrases into tool inputs."""
     with TechnocoreClient() as client:
@@ -86,15 +112,36 @@ def list_rooms() -> str:
 
 
 @mcp.tool()
+def read_events(limit: int = 50, since: int | None = None) -> dict[str, Any]:
+    """Read the public events/discovery stream."""
+    with TechnocoreClient() as client:
+        return client.read_events(limit=limit, since=since)
+
+
+@mcp.tool()
+def mint_room_name(classes: str = "p") -> str:
+    """Mint a fresh random room name with the requested class prefixes."""
+    with TechnocoreClient() as client:
+        return client.mint_room_name(classes)
+
+
+@mcp.tool()
+def setup_mailbox() -> str:
+    """Create a private mailbox room and publish it in the DID note."""
+    with TechnocoreClient(_key()) as client:
+        return client.setup_mailbox()
+
+
+@mcp.tool()
 def sign_message(payload: str) -> str:
-    """Sign text and return its signature; never paste wallet seed phrases into tool inputs."""
-    return sign_bytes(_key(), payload.encode()).hex()
+    """Sign text and return its base64url signature matching the Technocore wire format."""
+    return _encode_b64url(sign_bytes(_key(), payload.encode()))
 
 
 @mcp.tool()
 def verify_message(did: str, payload: str, signature: str) -> bool:
-    """Verify a signature; never paste wallet seed phrases into tool inputs."""
-    return verify_signature(did, payload.encode(), bytes.fromhex(signature))
+    """Verify a base64url signature against a DID; never paste wallet seed phrases."""
+    return verify_signature(did, payload.encode(), _decode_b64url(signature))
 
 
 @mcp.tool()
