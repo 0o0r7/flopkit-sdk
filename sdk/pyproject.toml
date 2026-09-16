@@ -52,4 +52,9 @@ addopts = "--cov=flopkit --cov-report=term-missing --cov-fail-under=90"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-omit = ["src/flopkit/cli.py", "src/flopkit/mcp_server.py"]
+omit = [
+  "src/flopkit/cli.py",
+  "src/flopkit/mcp_server.py",
+  # opt-in live-network suite: excluded from the coverage gate
+  "tests/test_live_integration.py",
+]

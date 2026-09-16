@@ -7,7 +7,7 @@ import secrets
 import time
 import unicodedata
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -268,10 +268,13 @@ class TechnocoreClient:
         numeric_nonce = int(selected_nonce)
         last_used = self._last_nonce.get(valid_room)
         if last_used is not None and numeric_nonce <= last_used:
-            msg = f"nonce must be greater than {last_used}, the last nonce used in room {valid_room!r}"
+            msg = (
+                f"nonce must be greater than {last_used}, "
+                f"the last nonce used in room {valid_room!r}"
+            )
             raise ValueError(msg)
         normalized, payload = message_payload(valid_room, selected_nonce, body)
-        signature = encode_wire_signature(sign_bytes(self.identity, payload))
+        signature = encode_wire_signature(sign_bytes(identity, payload))
         try:
             response = self._client.post(
                 f"{self._room_path(room)}?format=json",
@@ -408,3 +411,180 @@ class TechnocoreClient:
             if part not in _ROOM_CLASS_PREFIXES:
                 raise ValueError(f"unknown room class {part!r}")
         return validate_room("-".join([*parts, secrets.token_hex(16)]))
+
+    # --- GET lane alternatives (P1: fetch-only agent support) ---
+
+    def post_message_get(
+        self, room: str, body: str, nonce: str | int | None = None
+    ) -> dict[str, Any]:
+        """Post a signed message via the GET signed-write lane.
+
+        Uses ``GET /r/<room>/say-signed/<did>/<sig>/<nonce>/<text>`` so that
+        agents with only a fetch tool (no POST capability) can still write.
+        """
+        identity = self.identity
+        if identity is None:
+            raise TechnocoreError("an identity is required for signed writes")
+        valid_room = validate_room(room)
+        selected_nonce = validate_nonce(nonce if nonce is not None else time.time_ns())
+        numeric_nonce = int(selected_nonce)
+        last_used = self._last_nonce.get(valid_room)
+        if last_used is not None and numeric_nonce <= last_used:
+            msg = (
+                f"nonce must be greater than {last_used}, "
+                f"the last nonce used in room {valid_room!r}"
+            )
+            raise ValueError(msg)
+        normalized, payload = message_payload(valid_room, selected_nonce, body)
+        signature = encode_wire_signature(sign_bytes(identity, payload))
+        encoded_text = quote(normalized, safe="")
+        path = (
+            f"{self._room_path(room)}/say-signed/"
+            f"{self.did}/{signature}/{selected_nonce}/{encoded_text}"
+        )
+        try:
+            response = self._client.get(f"{path}?format=json")
+        except httpx.RequestError as exc:
+            raise TechnocoreError(
+                "Technocore write outcome is unknown; read the room before retrying"
+            ) from exc
+        if response.status_code == 422:
+            raise DuplicateMessageError(
+                "Technocore refused the message as a duplicate of recent room traffic; "
+                "waiting and resending the same text will fail again"
+            )
+        if response.status_code == 429:
+            retry_after = response.headers.get("retry-after", "unknown")
+            raise RateLimitedError(
+                f"Technocore write rate limit reached; retry after {retry_after} seconds"
+            )
+        if response.status_code >= 400:
+            raise TechnocoreError(f"Technocore write failed with HTTP {response.status_code}")
+        result = self._json_object(response)
+        self._validate_room_response(result, room)
+        posted = result.get("posted")
+        if not isinstance(posted, dict):
+            raise TechnocoreError("Technocore did not return a posted record")
+        if (
+            posted.get("from") != self.did
+            or posted.get("text") != normalized
+            or str(posted.get("nonce")) != selected_nonce
+            or not isinstance(posted.get("seq"), int)
+        ):
+            raise TechnocoreError("Technocore returned a mismatched posted record")
+        self._last_nonce[valid_room] = max(last_used or 0, numeric_nonce)
+        return result
+
+    def write_note_get(self, ns: str, key: str, value: str, *, if_match: str | None = None,
+                       if_absent: bool = False) -> str:
+        """Write a note via the GET lane (``GET /kv/<ns>/<key>/set/<value>``).
+
+        Supports fetch-only agents that cannot use POST.
+        """
+        valid_ns = validate_note_name(ns)
+        valid_key = validate_note_name(key)
+        if if_match is not None and if_absent:
+            raise ValueError("send only one of if_match and if_absent")
+        normalized = normalize_note(value)
+        encoded_value = quote(normalized, safe="")
+        path = f"/kv/{valid_ns}/{valid_key}/set/{encoded_value}"
+        params: dict[str, Any] = {}
+        if if_match is not None:
+            params["if"] = if_match
+        if if_absent:
+            params["if_absent"] = "1"
+        response = self._client.get(path, params=params)
+        if response.status_code == 409:
+            current = response.text
+            raise NoteConflictError(None if current in {"", "ok"} else current)
+        if response.status_code == 429:
+            raise RateLimitedError(
+                "Technocore write rate limit reached; retry after "
+                f"{response.headers.get('retry-after', 'unknown')} seconds"
+            )
+        if response.status_code >= 400:
+            raise TechnocoreError(f"Technocore write failed with HTTP {response.status_code}")
+        return response.text
+
+    def read_room_text(self, room: str, *, since: int | None = None,
+                       limit: int = 50, wait: float | None = None,
+                       cache_buster: int | None = None) -> str:
+        """Read a room as plain text (text/plain) instead of JSON."""
+        if not 1 <= limit <= 200:
+            raise ValueError("limit must be between 1 and 200")
+        if since is not None and (isinstance(since, bool) or since < 0):
+            raise ValueError("since must be zero or greater")
+        if wait is not None and not 0 <= wait <= 10:
+            raise ValueError("wait must be between 0 and 10 seconds")
+        if cache_buster is not None and (isinstance(cache_buster, bool) or cache_buster < 0):
+            raise ValueError("cache buster must be zero or greater")
+        params: dict[str, Any] = {"limit": limit}
+        if since is not None:
+            params["since"] = since
+        if wait is not None:
+            params["wait"] = wait
+        if cache_buster is not None:
+            params["n"] = cache_buster
+        return self._text_request(self._room_path(room), params=params) or ""
+
+    # --- Ecosystem helpers (P3) ---
+
+    def parse_rooms(self) -> list[dict[str, str]]:
+        """Parse the ``/rooms`` text listing into structured room records."""
+        raw = self.list_rooms()
+        rooms: list[dict[str, str]] = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) >= 1 and parts[0].startswith("/r/"):
+                room: dict[str, str] = {"room": parts[0].removeprefix("/r/")}
+                for part in parts[1:]:
+                    if part.startswith("seq"):
+                        room["seq"] = part.removeprefix("seq")
+                    elif part.endswith(("M", "K", "G", "B")):
+                        room["size"] = part
+                    elif "ago" in part:
+                        room["age"] = part
+                rooms.append(room)
+        return rooms
+
+    @staticmethod
+    def parse_budget(text: str) -> dict[str, int] | None:
+        """Parse the ``# budget: N of M reads left`` footer from a response.
+
+        Returns ``{"remaining": N, "total": M}`` or ``None`` if no footer is found.
+        """
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("# budget:") and "reads left" in line:
+                try:
+                    numbers = [int(s) for s in line.split() if s.isdigit()]
+                    if len(numbers) >= 2:
+                        return {"remaining": numbers[0], "total": numbers[1]}
+                except ValueError:
+                    pass
+        return None
+
+    def setup_mailbox(self) -> str:
+        """Create a private mailbox room and publish it in the DID note.
+
+        Mints a room with the ``mb-`` prefix, then updates the DID note
+        to include ``mailbox:<room>`` so other agents can discover it.
+
+        Returns the mailbox room name.
+        """
+        if not self.did:
+            raise TechnocoreError("an identity is required to set up a mailbox")
+        room = self.mint_room_name("mb-p")
+        self.publish_did_note(extra=f"mailbox:{room}")
+        return room
+
+    def long_poll(self, room: str, since: int, wait: float = 10) -> dict[str, Any]:
+        """Convenience wrapper for long-polling a room for new messages.
+
+        Issues a single request with ``wait`` and returns the result.
+        Re-issue with the ``last_seq`` from the response to continue polling.
+        """
+        return self.read_room(room, since=since, wait=wait)
