@@ -6,6 +6,7 @@ theme:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - TCLK guide: tclk-guide.md
   - Security: security.md
   - MCP setup: mcp.md
   - Performance evidence: evidence.md
