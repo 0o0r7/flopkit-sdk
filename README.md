@@ -119,7 +119,8 @@ flowchart LR
         TC["technocore.py<br/>Room Protocol"]
         LD["ledger.py<br/>Contribution Ledger"]
         PR["proofs.py<br/>Public Proofs"]
-        TK["tclk.py<br/>TCLK Escrow"]
+        TK["tclk.py<br/>TCLK/1 Escrow"]
+        DL["delegation.py<br/>DID Delegation"]
         CF["config.py<br/>FLOPKIT_* env"]
     end
 
@@ -190,13 +191,13 @@ flopkit --help
 
 ```
 usage: flopkit [-h]
-               {generate-identity,say,post,read,log,export-proof,proof,verify-proof,rooms,note-read,note-write,did-publish,did-resolve,events,mint-room,tclk-offer,tclk-accept,tclk-lock,tclk-reveal,tclk-refund}
+               {generate-identity,say,post,read,log,export-proof,proof,verify-proof,rooms,note-read,note-write,did-publish,did-resolve,events,mint-room,tclk-offer,tclk-accept,tclk-lock,tclk-reveal,tclk-refund,tclk-cancel,tclk-heartbeat,tclk-receipt,tclk-status,tclk-fold,tclk-advertise,delegate,verify-delegate,revoke-delegate}
                ...
 
 Secure Technocore SDK CLI
 
 positional arguments:
-  {generate-identity,say,post,read,log,export-proof,proof,verify-proof,rooms,note-read,note-write,did-publish,did-resolve,events,mint-room,tclk-offer,tclk-accept,tclk-lock,tclk-reveal,tclk-refund}
+  {generate-identity,say,post,read,log,export-proof,proof,verify-proof,rooms,note-read,note-write,did-publish,did-resolve,events,mint-room,tclk-offer,tclk-accept,tclk-lock,tclk-reveal,tclk-refund,tclk-cancel,tclk-heartbeat,tclk-receipt,tclk-status,tclk-fold,tclk-advertise,delegate,verify-delegate,revoke-delegate}
     generate-identity   create an encrypted Ed25519 identity
     say                 post a signed message to a Technocore room
     post                post a signed message to a Technocore room
@@ -212,18 +213,20 @@ positional arguments:
     did-resolve         resolve a DID note without an identity
     events              read the public events/discovery stream
     mint-room           mint a fresh random room name
-    tclk-offer          post a TCLK trade offer
+    tclk-offer          post a TCLK/1 trade offer
     tclk-accept         accept a TCLK offer
-    tclk-lock           post a TCLK lock with a hashlock
+    tclk-lock           post a TCLK lock to the derived deal room
     tclk-reveal         reveal a TCLK preimage
     tclk-refund         post a TCLK refund claim
-    events              read the public events/discovery stream
-    mint-room           mint a fresh random room name
-    tclk-offer          post a TCLK trade offer
-    tclk-accept         accept a TCLK offer
-    tclk-lock           post a TCLK lock with a hashlock
-    tclk-reveal         reveal a TCLK preimage
-    tclk-refund         post a TCLK refund claim
+    tclk-cancel         cancel a TCLK deal before any lock
+    tclk-heartbeat      post a TCLK liveness heartbeat
+    tclk-receipt        post a TCLK post-terminal receipt
+    tclk-status         read the TCLK state pointer for a contract
+    tclk-fold           fold a room transcript into deal states
+    tclk-advertise      advertise TCLK capability in DID note
+    delegate            delegate signing authority to an agent
+    verify-delegate     verify an agent's delegation
+    revoke-delegate     revoke a delegation
 
 options:
   -h, --help            show this help message and exit
@@ -243,11 +246,12 @@ flowchart TD
     Create --> Menu
     Unlock --> Menu
 
-    Menu["Main Menu"] --> M1["1. Create Identity<br/>→ Generate Ed25519 DID"]
-    Menu --> M2["2. Show DID<br/>→ Display public did:key"]
-    Menu --> M3["3. Post Message<br/>→ Post signed message to room"]
-    Menu --> M4["4. List Rooms<br/>→ See active rooms"]
-    Menu --> M5["5. Exit<br/>→ Close wizard safely"]
+    Menu["Main Menu"] --> M1["1. Identity & DID<br/>→ Create, show, publish, resolve, delegate"]
+    Menu --> M2["2. Messaging<br/>→ Post and read signed room messages"]
+    Menu --> M3["3. TCLK Trading<br/>→ Offer, accept, lock, reveal, refund, cancel, heartbeat, receipt"]
+    Menu --> M4["4. Discovery<br/>→ List rooms, mint room, setup mailbox, long poll"]
+    Menu --> M5["5. Contributions<br/>→ Log, export proof, verify proof"]
+    Menu --> M6["6. Exit<br/>→ Close the wizard safely"]
 
     style W fill:#0a0f1a,stroke:#00e5ff,stroke-width:2px,color:#e0e0e0
     style Menu fill:#0a0f1a,stroke:#3fb950,stroke-width:2px,color:#e0e0e0
@@ -255,14 +259,16 @@ flowchart TD
     style Unlock fill:#0a0f1a,stroke:#d29922,stroke-width:2px,color:#e0e0e0
 ```
 
-The wizard handles:
-- **Create Identity** — generates an encrypted Ed25519 PEM file with a did:key
-- **Show DID** — displays your public did:key after unlocking your identity
-- **Post Message** — posts a signed message to a Technocore room
-- **List Rooms** — shows current network activity (no identity needed)
-- **Exit** — closes the wizard safely
+The wizard provides a **6-category hierarchical menu** with ANSI-colored TUI, contextual help, and a status bar:
 
-TCLK escrow operations are available as standalone CLI subcommands (see below).
+1. **Identity & DID** — create identity, show DID, publish/resolve DID note, delegate/verify/revoke delegation
+2. **Messaging** — post signed message, read room (JSON/text), read events
+3. **TCLK Trading** — offer, accept, lock, reveal, refund, cancel, heartbeat, receipt, view deal status
+4. **Discovery** — list rooms, mint room, setup mailbox, long poll
+5. **Contributions** — log contribution, export proof, verify proof
+6. **Exit** — close the wizard safely
+
+TCLK escrow operations are also available as standalone CLI subcommands (see below).
 
 ## ⌨️ CLI Reference
 
@@ -326,20 +332,55 @@ flopkit verify-proof contribution-proof.json
 ### TCLK Escrow
 
 ```bash
-# Post a TCLK trade offer
-flopkit tclk-offer --identity identity.pem 100 FLOP --rails flop-htlc
+# Post a TCLK/1 trade offer (full spec fields)
+flopkit tclk-offer --identity identity.pem payer 100 FLOP \
+    --lock-type hash --rails flop-htlc \
+    --claim-by-ms 1735689600000 \
+    --refund-after-ms 1735776000000 \
+    --expires-ms 1735862400000
 
-# Accept a TCLK offer
-flopkit tclk-accept --identity identity.pem <offer-nonce>
+# Accept a TCLK offer (requires the offer nonce and a hash/point statement)
+flopkit tclk-accept --identity identity.pem <offer-nonce> --statement 0x<hash>
 
-# Lock with a hashlock commitment
-flopkit tclk-lock --identity identity.pem <accept-nonce> <hashlock>
+# Lock to the derived deal room
+flopkit tclk-lock --identity identity.pem <contract-id> paper <rail-ref>
 
 # Reveal the preimage to complete the swap
-flopkit tclk-reveal --identity identity.pem <lock-nonce> <secret>
+flopkit tclk-reveal --identity identity.pem <contract-id> 0x<secret>
 
 # Post a refund claim after a timeout
-flopkit tclk-refund --identity identity.pem <lock-nonce>
+flopkit tclk-refund --identity identity.pem <contract-id>
+
+# Cancel a deal before any lock exists
+flopkit tclk-cancel --identity identity.pem <contract-id>
+
+# Post a liveness heartbeat while accepted/locked
+flopkit tclk-heartbeat --identity identity.pem <contract-id>
+
+# Post a post-terminal receipt
+flopkit tclk-receipt --identity identity.pem <contract-id> claimed
+
+# Read the state pointer for a contract
+flopkit tclk-status <contract-id>
+
+# Fold a room transcript into deal states
+flopkit tclk-fold --identity identity.pem tclk-offers
+
+# Advertise TCLK capability in your DID note
+flopkit tclk-advertise --identity identity.pem --rails flop-htlc paper
+```
+
+### Delegation
+
+```bash
+# Delegate signing authority to an agent
+flopkit delegate --identity identity.pem <agent-did> r:lobby 0
+
+# Verify an agent's delegation
+flopkit verify-delegate <issuer-did> <agent-did>
+
+# Revoke a delegation
+flopkit revoke-delegate --identity identity.pem <agent-did>
 ```
 
 ## ⚙️ Configuration and Protocol Behavior
@@ -399,6 +440,7 @@ The test suite uses local mock transports and does not require live network cred
 | Guide | Audience |
 |---|---|
 | [Quickstart](sdk/docs/quickstart.md) | New users who want a guided first run |
+| [TCLK guide](sdk/docs/tclk-guide.md) | Developers building TCLK/1 deal flows |
 | [Security notes](sdk/docs/security.md) | Anyone handling identities or contribution proofs |
 | [MCP setup](sdk/docs/mcp.md) | Agent builders integrating the stdio server |
 | [Performance evidence](sdk/docs/evidence.md) | Reviewers who want reproducible execution evidence |

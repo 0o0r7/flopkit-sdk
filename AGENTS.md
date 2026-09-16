@@ -2,7 +2,7 @@
 
 ## What this project is
 
-`flopkit` is a Python 3.12 SDK, CLI, and optional MCP server for Ed25519 DID identities and signed AI-agent contributions on the Flop Network. There is **no web frontend or backend API** — it is a library + command-line tool. All source lives under `sdk/`.
+`flopkit` is a Python 3.12 SDK, CLI, and optional MCP server for Ed25519 DID identities, signed AI-agent contributions, TCLK/1 deal-making, and DID delegation on the Flop Network. There is **no web frontend or backend API** — it is a library + command-line tool. All source lives under `sdk/`.
 
 ## How it runs in the preview
 
@@ -25,17 +25,53 @@ docker compose -f docker-compose.base44.yml exec -T docs sh -c "cd /app/sdk && f
 docker compose -f docker-compose.base44.yml exec -T docs sh -c "cd /app/sdk && python -m pytest -q"
 ```
 
-All 65 tests pass with 94% coverage. The full quality gate (ruff, mypy --strict, pytest --cov-fail-under=90, mkdocs --strict) passes cleanly.
+All tests pass with 95% coverage. The full quality gate (ruff, mypy --strict, pytest --cov-fail-under=90, mkdocs --strict) passes cleanly.
 
-## Upgrade summary
+## Upgrade summary (second pass)
 
-The SDK was upgraded to align with the latest FLOP ecosystem:
+The SDK was finalized to align with the latest FLOP ecosystem:
 
-- **P0**: Fixed wizard.run() to accept injectable prompt_fn/output_fn; removed dead except blocks
-- **P1**: Added GET signed-write lane (post_message_get), GET note-write lane (write_note_get), text/plain read path (read_room_text); fixed MCP server to use base64url instead of hex for signatures
-- **P2**: Completed TCLK state machine (offer → accept → lock → reveal → refund); added CLI subcommands (events, mint-room, tclk-offer/accept/lock/reveal/refund); expanded __init__.py exports; full type annotations in tclk.py
-- **P3**: Added ecosystem helpers (parse_rooms, parse_budget, setup_mailbox, long_poll); polished wizard TUI with ANSI colors (dim/bold/green/red/yellow); 5-option menu
-- **CI**: Updated GitHub Actions to enforce ruff + mypy + pytest --cov-fail-under=90 + mkdocs --strict
+- **P0**: Fixed wizard.py dead code (duplicate `if action == "back": break` line)
+- **P0**: Updated README.md — removed duplicated CLI command listings, added all new TCLK subcommands (tclk-cancel, tclk-heartbeat, tclk-receipt, tclk-status, tclk-fold, tclk-advertise) and delegation commands (delegate, verify-delegate, revoke-delegate), updated wizard section from 5-option menu to 6-category hierarchical menu, updated architecture diagram to include delegation.py, added Delegation section to CLI reference
+- **P0**: Updated quickstart.md — updated help output to 30+ subcommands, updated wizard section to 6 hierarchical categories, fixed TCLK CLI examples with correct spec-conformant parameters, added delegation examples
+- **P1**: Created tclk-guide.md — comprehensive TCLK/1 protocol reference (8 frame types, state machine, contract ID derivation, deal rooms, transcript folding, HTLC flow, PTLC interface, settlement rails, capability advertisement)
+- **P1**: Added tclk-guide.md to mkdocs.yml navigation and linked from index.md and quickstart.md
+- **P1**: Added test_coverage_gaps.py — 83 new tests covering TCLK state machine guards, wizard actions, and error paths; raised coverage from 85% to 95%
+- **P2**: Rewrote AGENTS.md to reflect the second upgrade (TCLK/1 spec conformance, delegation, wizard TUI, CLI expansion, MCP server, documentation updates)
+
+## TCLK/1 spec conformance
+
+The TCLK module (`sdk/src/flopkit/tclk.py`) implements all 8 frame types per `flop-labs/tclk SPEC.md`:
+- Offer, accept, lock, reveal, refund, cancel, heartbeat, receipt
+- Content-addressed offer IDs (domain-separated SHA-256)
+- Deterministic contract ID derivation over {offer, accept-core}
+- Derived deal rooms (`mb-p-tclk-<hex>`)
+- State machine with guards (claim deadline, refund window, replay dedupe)
+- Transcript folding with signature verification
+- Settlement rail protocol (PaperRail reference implementation)
+- HTLC full path + PTLC wire-format interface (reference/unaudited)
+
+## Delegation
+
+The delegation module (`sdk/src/flopkit/delegation.py`) implements DID delegation:
+- Create/verify/revoke delegation records in DID notes
+- Nonce-based revocation (higher nonce wins)
+- Expiry checking
+- Scope validation
+
+## Wizard TUI
+
+The wizard (`sdk/src/flopkit/wizard.py`) provides a 6-category hierarchical menu:
+1. Identity & DID (create, show, publish, resolve, delegate, verify, revoke)
+2. Messaging (post, read JSON, read text, events)
+3. TCLK Trading (offer, accept, lock, reveal, refund, cancel, heartbeat, receipt, status)
+4. Discovery (rooms, mint, mailbox, long poll)
+5. Contributions (log, export, verify)
+6. Exit
+
+## CLI expansion
+
+The CLI (`sdk/src/flopkit/cli.py`) now has 30+ subcommands covering identity, messaging, notes, TCLK/1, delegation, and discovery.
 
 ## Secrets
 

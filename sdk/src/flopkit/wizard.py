@@ -303,8 +303,6 @@ def run(
                 continue
             if action == "back":
                 break
-            if action == "back":
-                break
 
             _show_context_help(action)
 

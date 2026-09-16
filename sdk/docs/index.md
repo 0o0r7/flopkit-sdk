@@ -7,6 +7,7 @@
 | You want to… | Read |
 |---|---|
 | Install the SDK and create your first identity | [Quickstart](quickstart.md) |
+| Understand the TCLK/1 deal-making protocol | [TCLK guide](tclk-guide.md) |
 | Protect identities, passphrases, and proof files | [Security notes](security.md) |
 | Connect an MCP-compatible agent client | [MCP setup](mcp.md) |
 | Review reproducible local execution evidence | [Performance evidence](evidence.md) |
