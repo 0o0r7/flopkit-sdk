@@ -30,7 +30,6 @@ from flopkit.proofs import (
 from flopkit.tclk import (
     FrameType,
     PaperRail,
-    TCLKContract,
     TCLKError,
     TCLKManager,
     TCLKState,
@@ -41,13 +40,14 @@ from flopkit.tclk import (
     derive_contract_id,
     encode_frame,
     fold_transcript,
+    generate_point_lock,
     generate_secret,
     hashlock_from_secret,
+    offer_id,
     parse_capability_token,
     state_pointer_path,
     validate_point_statement,
     verify_hashlock,
-    generate_point_lock,
 )
 from flopkit.technocore import (
     DuplicateMessageError,
@@ -528,8 +528,10 @@ def test_state_pointer_path() -> None:
 
 def test_capability_token_and_parse() -> None:
     token = capability_token(["flop-htlc", "paper"])
-    assert token == "tclk1:flop-htlc,paper"
-    parsed = parse_capability_token(f"did:key:z6Mktest {token} extra")
+    assert token == "tclk1:flop-htlc,paper"  # noqa: S105  # protocol prefix, not a secret
+    parsed = parse_capability_token(
+        f"did:key:z6Mktest {token} extra"
+    )
     assert parsed == ["flop-htlc", "paper"]
     assert parse_capability_token("no token here") is None
 
@@ -586,7 +588,7 @@ def test_tclk_post_offer(tmp_path: Path) -> None:
         mgr = TCLKManager(client)
         result = mgr.post_offer(
             role="payer", amount="100", asset="FLOP", lock="hash",
-            rails=["flop-htlc"], claim_by_ms=9999999999000,
+            rails=["flop-htlc"], claim_by_ms=9999999998000,
             refund_after_ms=9999999999000, expires_ms=9999999999000,
         )
     assert "nonce" in result
@@ -598,7 +600,7 @@ def test_tclk_post_offer(tmp_path: Path) -> None:
     assert frame["type"] == "offer"
     assert frame["role"] == "payer"
     assert frame["lock"] == "hash"
-    assert frame["claimByMs"] == 9999999999000
+    assert frame["claimByMs"] == 9999999998000
 
 
 def test_tclk_post_offer_rejects_bad_role(tmp_path: Path) -> None:
@@ -621,7 +623,7 @@ def test_tclk_full_deal_cycle(tmp_path: Path) -> None:
         mgr = TCLKManager(client)
         now = int(time.time() * 1000)
         # Post offer
-        offer_result = mgr.post_offer(
+        mgr.post_offer(
             role="payer", amount="100", asset="FLOP", lock="hash",
             rails=["paper"], claim_by_ms=now + 3600000,
             refund_after_ms=now + 7200000, expires_ms=now + 1800000,
@@ -636,13 +638,13 @@ def test_tclk_full_deal_cycle(tmp_path: Path) -> None:
         accept_result = mgr.post_accept(offer=offer_frame, statement=statement)
         contract_id = accept_result["contract"]
         # Post lock to derived deal room
-        lock_nonce = mgr.post_lock(
+        mgr.post_lock(
             contract_id=contract_id, rail="paper", ref="paper-ref-1",
         )
         # Post reveal
-        reveal_nonce = mgr.post_reveal(contract_id=contract_id, secret=secret)
+        mgr.post_reveal(contract_id=contract_id, secret=secret)
         # Post receipt
-        receipt_nonce = mgr.post_receipt(
+        mgr.post_receipt(
             contract_id=contract_id, outcome="claimed", rail="paper", ref="paper-ref-1",
         )
     # Verify all frame types were posted
@@ -663,7 +665,7 @@ def test_tclk_cancel_before_lock(tmp_path: Path) -> None:
     with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
         mgr = TCLKManager(client)
         now = int(time.time() * 1000)
-        offer_result = mgr.post_offer(
+        mgr.post_offer(
             role="payer", amount="100", asset="FLOP", lock="hash",
             rails=["paper"], claim_by_ms=now + 3600000,
             refund_after_ms=now + 7200000, expires_ms=now + 1800000,
@@ -674,7 +676,7 @@ def test_tclk_cancel_before_lock(tmp_path: Path) -> None:
         accept_result = mgr.post_accept(
             offer=offer_frame, statement=hashlock_from_secret(generate_secret()),
         )
-        cancel_nonce = mgr.post_cancel(contract_id=accept_result["contract"])
+        mgr.post_cancel(contract_id=accept_result["contract"])
     # Verify cancel was posted to the deal room
     deal_room = deal_room_name(accept_result["contract"])
     cancel_msgs = [m for m in mock.messages[deal_room] if "cancel" in m["text"]]
@@ -687,7 +689,7 @@ def test_tclk_heartbeat(tmp_path: Path) -> None:
     with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
         mgr = TCLKManager(client)
         now = int(time.time() * 1000)
-        offer_result = mgr.post_offer(
+        mgr.post_offer(
             role="payer", amount="100", asset="FLOP", lock="hash",
             rails=["paper"], claim_by_ms=now + 3600000,
             refund_after_ms=now + 7200000, expires_ms=now + 1800000,
@@ -698,7 +700,7 @@ def test_tclk_heartbeat(tmp_path: Path) -> None:
         accept_result = mgr.post_accept(
             offer=offer_frame, statement=hashlock_from_secret(generate_secret()),
         )
-        hb_nonce = mgr.post_heartbeat(
+        mgr.post_heartbeat(
             contract_id=accept_result["contract"], note="still here",
         )
     deal_room = deal_room_name(accept_result["contract"])
@@ -711,7 +713,7 @@ def test_tclk_advertise_capability(tmp_path: Path) -> None:
     mock = MockTechnocore()
     with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
         mgr = TCLKManager(client)
-        path = mgr.advertise_capability(["flop-htlc", "paper"])
+        mgr.advertise_capability(["flop-htlc", "paper"])
     shard, note_key = did_note_path(did)
     note = mock.notes.get((f"did-{shard}", note_key))
     assert note is not None
@@ -739,19 +741,19 @@ def test_fold_transcript_basic(tmp_path: Path) -> None:
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 9999999999000,
+        "rails": ["paper"], "claimByMs": 9999999998000,
         "refundAfterMs": 9999999999000, "expiresMs": 9999999999000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     accept_frame = {
-        "type": "accept", "from": did2, "ref": "111",
+        "type": "accept", "from": did2, "ref": offer_frame["id"],
         "statement": "0x" + "b" * 64, "contract": "",
         "nonce": "222",
     }
-    # The accept's contract field references the offer's id
-    accept_frame["contract"] = offer_frame["id"]
-    # The derived contract id is hash(offer+accept)
+    # The contract id is derived over {offer, accept-core} (SPEC §3.2)
     contract_id = derive_contract_id(offer_frame, accept_frame)
+    accept_frame["contract"] = contract_id
 
     records = [
         {"room": "tclk-offers", "seq": 1, "ts": 1000, "from": did1,
@@ -770,10 +772,11 @@ def test_fold_transcript_rejects_wrong_room(tmp_path: Path) -> None:
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 9999999999000,
+        "rails": ["paper"], "claimByMs": 9999999998000,
         "refundAfterMs": 9999999999000, "expiresMs": 9999999999000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     records = [
         {"room": "wrong-room", "seq": 1, "ts": 1000, "from": did1,
          "nonce": "111", "sig": "", "text": encode_frame(offer_frame)},
@@ -810,14 +813,15 @@ def test_fold_transcript_expired_offer_cancelled(tmp_path: Path) -> None:
         "amount": "100", "asset": "FLOP", "lock": "hash",
         "rails": ["paper"], "claimByMs": 2000,
         "refundAfterMs": 3000, "expiresMs": 1500,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     records = [
         {"room": "tclk-offers", "seq": 1, "ts": 1000, "from": did1,
          "nonce": "111", "sig": "", "text": encode_frame(offer_frame)},
     ]
     result = fold_transcript(records, now_ms=5000)
-    contract = result.contracts[offer_frame["id"]]
+    contract = result.contracts[str(offer_frame["id"])]
     assert contract.state == TCLKState.CANCELLED
 
 
@@ -1198,7 +1202,7 @@ def test_wizard_read_room_json(
 
     monkeypatch.setattr("flopkit.wizard.TechnocoreClient", MockedClient)
     output: list[str] = []
-    choices = iter(["2", "2", "", "", "0", "6"])
+    choices = iter(["2", "2", "", "", "", "0", "6"])
     run_wizard(lambda _p: next(choices), output.append)
     assert any("No messages" in line or "lobby" in line for line in output)
 
@@ -1287,20 +1291,21 @@ def test_wizard_verify_proof(
 def test_tclk_lock_after_refund_window_rejected(tmp_path: Path) -> None:
     key, did1 = generate_identity("secret", tmp_path / "id1.pem")
     _, did2 = generate_identity("secret2", tmp_path / "id2.pem")
-    now = 1000
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 2000,
+        "rails": ["paper"], "claimByMs": 1200,
         "refundAfterMs": 1500, "expiresMs": 5000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     accept_frame = {
-        "type": "accept", "from": did2, "ref": "111",
-        "statement": "0x" + "b" * 64, "contract": "0x" + "a" * 64,
+        "type": "accept", "from": did2, "ref": offer_frame["id"],
+        "statement": "0x" + "b" * 64, "contract": "",
         "nonce": "222",
     }
     contract_id = derive_contract_id(offer_frame, accept_frame)
+    accept_frame["contract"] = contract_id
     lock_frame = {
         "type": "lock", "from": did1, "contract": contract_id,
         "rail": "paper", "ref": "ref1",
@@ -1325,16 +1330,18 @@ def test_tclk_heartbeat_on_wrong_state_rejected(tmp_path: Path) -> None:
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 9999999999000,
+        "rails": ["paper"], "claimByMs": 9999999998000,
         "refundAfterMs": 9999999999000, "expiresMs": 9999999999000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     accept_frame = {
-        "type": "accept", "from": did2, "ref": "111",
-        "statement": "0x" + "b" * 64, "contract": "0x" + "a" * 64,
+        "type": "accept", "from": did2, "ref": offer_frame["id"],
+        "statement": "0x" + "b" * 64, "contract": "",
         "nonce": "222",
     }
     contract_id = derive_contract_id(offer_frame, accept_frame)
+    accept_frame["contract"] = contract_id
     heartbeat_frame = {
         "type": "heartbeat", "from": did1, "contract": contract_id,
         "nonce": "333",
@@ -1356,16 +1363,18 @@ def test_tclk_cancel_after_lock_rejected(tmp_path: Path) -> None:
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 9999999999000,
+        "rails": ["paper"], "claimByMs": 9999999998000,
         "refundAfterMs": 9999999999000, "expiresMs": 9999999999000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     accept_frame = {
-        "type": "accept", "from": did2, "ref": "111",
-        "statement": "0x" + "b" * 64, "contract": "0x" + "a" * 64,
+        "type": "accept", "from": did2, "ref": offer_frame["id"],
+        "statement": "0x" + "b" * 64, "contract": "",
         "nonce": "222",
     }
     contract_id = derive_contract_id(offer_frame, accept_frame)
+    accept_frame["contract"] = contract_id
     lock_frame = {
         "type": "lock", "from": did1, "contract": contract_id,
         "rail": "paper", "ref": "ref1",
@@ -1393,16 +1402,18 @@ def test_tclk_receipt_on_non_terminal_rejected(tmp_path: Path) -> None:
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 9999999999000,
+        "rails": ["paper"], "claimByMs": 9999999998000,
         "refundAfterMs": 9999999999000, "expiresMs": 9999999999000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     accept_frame = {
-        "type": "accept", "from": did2, "ref": "111",
-        "statement": "0x" + "b" * 64, "contract": "0x" + "a" * 64,
+        "type": "accept", "from": did2, "ref": offer_frame["id"],
+        "statement": "0x" + "b" * 64, "contract": "",
         "nonce": "222",
     }
     contract_id = derive_contract_id(offer_frame, accept_frame)
+    accept_frame["contract"] = contract_id
     receipt_frame = {
         "type": "receipt", "from": did1, "contract": contract_id,
         "outcome": "claimed",
@@ -1428,16 +1439,18 @@ def test_tclk_reveal_wrong_secret_rejected(tmp_path: Path) -> None:
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 9999999999000,
+        "rails": ["paper"], "claimByMs": 9999999998000,
         "refundAfterMs": 9999999999000, "expiresMs": 9999999999000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     accept_frame = {
-        "type": "accept", "from": did2, "ref": "111",
-        "statement": statement, "contract": "0x" + "a" * 64,
+        "type": "accept", "from": did2, "ref": offer_frame["id"],
+        "statement": statement, "contract": "",
         "nonce": "222",
     }
     contract_id = derive_contract_id(offer_frame, accept_frame)
+    accept_frame["contract"] = contract_id
     lock_frame = {
         "type": "lock", "from": did1, "contract": contract_id,
         "rail": "paper", "ref": "ref1",
@@ -1470,16 +1483,18 @@ def test_tclk_full_lifecycle_with_fold(tmp_path: Path) -> None:
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 9999999999000,
+        "rails": ["paper"], "claimByMs": 9999999998000,
         "refundAfterMs": 9999999999000, "expiresMs": 9999999999000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     accept_frame = {
-        "type": "accept", "from": did2, "ref": "111",
-        "statement": statement, "contract": "0x" + "a" * 64,
+        "type": "accept", "from": did2, "ref": offer_frame["id"],
+        "statement": statement, "contract": "",
         "nonce": "222",
     }
     contract_id = derive_contract_id(offer_frame, accept_frame)
+    accept_frame["contract"] = contract_id
     lock_frame = {
         "type": "lock", "from": did1, "contract": contract_id,
         "rail": "paper", "ref": "ref1",
@@ -1522,16 +1537,18 @@ def test_tclk_refund_after_deadline(tmp_path: Path) -> None:
     offer_frame = {
         "type": "offer", "from": did1, "role": "payer",
         "amount": "100", "asset": "FLOP", "lock": "hash",
-        "rails": ["paper"], "claimByMs": 2000,
+        "rails": ["paper"], "claimByMs": 1200,
         "refundAfterMs": 1500, "expiresMs": 5000,
-        "nonce": "111", "id": "0x" + "a" * 64,
+        "nonce": "111",
     }
+    offer_frame["id"] = offer_id(offer_frame)
     accept_frame = {
-        "type": "accept", "from": did2, "ref": "111",
-        "statement": statement, "contract": "0x" + "a" * 64,
+        "type": "accept", "from": did2, "ref": offer_frame["id"],
+        "statement": statement, "contract": "",
         "nonce": "222",
     }
     contract_id = derive_contract_id(offer_frame, accept_frame)
+    accept_frame["contract"] = contract_id
     lock_frame = {
         "type": "lock", "from": did1, "contract": contract_id,
         "rail": "paper", "ref": "ref1",
@@ -1573,9 +1590,9 @@ def test_tclk_post_offer_with_payment_key_and_job(tmp_path: Path) -> None:
     mock = MockTechnocore()
     with TechnocoreClient(key, transport=httpx.MockTransport(mock)) as client:
         mgr = TCLKManager(client)
-        result = mgr.post_offer(
+        mgr.post_offer(
             role="payer", amount="100", asset="FLOP", lock="hash",
-            rails=["flop-htlc"], claim_by_ms=9999999999000,
+            rails=["flop-htlc"], claim_by_ms=9999999998000,
             refund_after_ms=9999999999000, expires_ms=9999999999000,
             payment_key="0x" + "a" * 64,
             job={"id": "task-1", "proto": "a2a"},

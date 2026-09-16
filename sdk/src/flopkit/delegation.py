@@ -11,11 +11,10 @@ Higher nonce wins per agent; expired records are rejected.
 from __future__ import annotations
 
 import re
-import secrets
 import time
 
 from .identity import sign_bytes, verify_signature
-from .technocore import TechnocoreClient, TechnocoreError, did_note_path
+from .technocore import TechnocoreClient, did_note_path
 
 _DELEGATE_PREFIX = "delegate:"
 _SCOPE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")

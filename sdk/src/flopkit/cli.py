@@ -264,7 +264,7 @@ def _verify_delegate(args: argparse.Namespace) -> dict[str, Any]:
         result = mgr.verify_delegate(args.issuer_did, args.agent_did)
     if result is None:
         return {"valid": False, "reason": "no delegation found"}
-    return result  # type: ignore[return-value]
+    return result
 
 
 def _revoke_delegate(args: argparse.Namespace) -> dict[str, Any]:

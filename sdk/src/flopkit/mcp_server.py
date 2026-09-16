@@ -325,7 +325,7 @@ def verify_delegation(issuer_did: str, agent_did: str) -> dict[str, Any]:
         result = mgr.verify_delegate(issuer_did, agent_did)
     if result is None:
         return {"valid": False, "reason": "no delegation found"}
-    return result  # type: ignore[return-value]
+    return result
 
 
 @mcp.tool()

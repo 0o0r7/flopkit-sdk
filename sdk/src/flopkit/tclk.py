@@ -16,10 +16,10 @@ import re
 import secrets
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol
 
-from .technocore import TechnocoreClient, TechnocoreError
+from .technocore import TechnocoreClient
 
 # --- Constants from SPEC.md ---
 
@@ -27,7 +27,7 @@ MAX_FRAME_CHARS = 4096
 OFFERS_ROOM = "tclk-offers"
 DEAL_ROOM_PREFIX = "mb-p-tclk-"
 STATE_POINTER_NS_PREFIX = "kv/tclk-"
-CAPABILITY_TOKEN_PREFIX = "tclk1:"
+CAPABILITY_TOKEN_PREFIX = "tclk1:"  # noqa: S105  # protocol token prefix, not a credential
 
 # Hash statement: 0x + 64 lowercase hex (32 bytes)
 _HASH_RE = re.compile(r"^0x[0-9a-f]{64}$")
@@ -46,8 +46,11 @@ _LOCK_KINDS = frozenset({"hash", "point"})
 # Rail ids (canonical, lowercase, no punctuation)
 _RAIL_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
+# Domain-separation tag shared with the flop-labs/tclk reference (frames.ts).
+TCLK_DOMAIN = "FLOP::tclk::v1"
 
-class FrameType(str, Enum):
+
+class FrameType(StrEnum):
     """All tclk/1 frame types per SPEC.md §3."""
 
     OFFER = "offer"
@@ -60,7 +63,7 @@ class FrameType(str, Enum):
     RECEIPT = "receipt"
 
 
-class TCLKState(str, Enum):
+class TCLKState(StrEnum):
     """Contract lifecycle states per SPEC.md §4."""
 
     OFFERED = "offered"
@@ -123,6 +126,11 @@ def _validate_lock_kind(lock: str) -> str:
     if lock not in _LOCK_KINDS:
         raise TCLKError(f"lock must be 'hash' or 'point', got {lock!r}")
     return lock
+
+
+def _normalize_rails(rails: list[str]) -> list[str]:
+    """Builder-side rail normalization (SPEC.md §3.1): dedupe + lexical order."""
+    return sorted(set(rails))
 
 
 def _validate_rails(rails: list[str]) -> list[str]:
@@ -191,16 +199,52 @@ def decode_frame(line: str) -> dict[str, Any]:
 # --- Contract ID derivation (SPEC.md §3.1) ---
 
 
-def derive_contract_id(offer_frame: dict[str, Any], accept_frame: dict[str, Any]) -> str:
-    """Derive the contract id from the canonical offer and accept frames.
+def domain_hash(tag: str, payload: str) -> str:
+    """Domain-separated SHA-256, byte-identical to the reference ``domainHash()``.
 
-    The contract id is SHA-256 of the canonical offer line concatenated
-    with the canonical accept line.
+    Computes ``0x + sha256("FLOP::tclk::v1|" + tag + "|" + payload)`` where the
+    payload is already the ASCII-escaped canonical form (SPEC.md §3.1).
     """
-    offer_line = encode_frame(offer_frame)
-    accept_line = encode_frame(accept_frame)
-    digest = hashlib.sha256((offer_line + accept_line).encode()).hexdigest()
-    return f"0x{digest}"
+    raw = f"{TCLK_DOMAIN}|{tag}|{payload}".encode()
+    return f"0x{hashlib.sha256(raw).hexdigest()}"
+
+
+def offer_id(fields: dict[str, Any]) -> str:
+    """Derive the offer id per SPEC.md §3.1.
+
+    ``id = 0x + sha256("FLOP::tclk::v1|offer|" + canonical JSON of the offer
+    without ``id``)``. Deterministic: every conforming implementation derives
+    the same id for the same offer content.
+    """
+    body = {k: v for k, v in fields.items() if k != "id"}
+    return domain_hash("offer", _canonical_json(body))
+
+
+def _accept_core(accept_frame: dict[str, Any]) -> dict[str, Any]:
+    """Extract the AcceptCore fields the contract id commits to (SPEC.md §3.2)."""
+    core: dict[str, Any] = {
+        k: accept_frame[k]
+        for k in ("from", "ref", "statement", "nonce")
+        if k in accept_frame
+    }
+    if accept_frame.get("paymentKey"):
+        core["paymentKey"] = accept_frame["paymentKey"]
+    return core
+
+
+def derive_contract_id(offer_frame: dict[str, Any], accept_frame: dict[str, Any]) -> str:
+    """Derive the contract id per SPEC.md §3.2.
+
+    ``contract = 0x + sha256("FLOP::tclk::v1|contract|" + canonical JSON of
+    {offer, accept})`` where ``offer`` is the full offer frame (id included)
+    and ``accept`` is the acceptance core (from, ref, statement, paymentKey?,
+    nonce). Both sides recompute it; a mismatch rejects the frame.
+    """
+    payload = _canonical_json({
+        "offer": offer_frame,
+        "accept": _accept_core(accept_frame),
+    })
+    return domain_hash("contract", payload)
 
 
 def deal_room_name(contract_id: str) -> str:
@@ -413,11 +457,10 @@ def fold_transcript(
         TranscriptFoldResult with contracts, malformed, and rejected lists.
     """
     from .identity import verify_signature
-    from .technocore import encode_wire_signature
 
     result = TranscriptFoldResult()
     contracts: dict[str, TCLKContract] = {}
-    offers_by_nonce: dict[str, dict[str, Any]] = {}
+    offers_by_id: dict[str, dict[str, Any]] = {}
     max_ts = 0
 
     for record in records:
@@ -465,7 +508,7 @@ def fold_transcript(
             result.malformed.append({"seq": seq, "reason": str(exc)})
             continue
 
-        frame_type = frame.get("type")
+        frame.get("type")
         frame_from = frame.get("from", sender)
 
         # Verify sender matches frame 'from'
@@ -479,7 +522,7 @@ def fold_transcript(
         # Apply frame to state machine
         try:
             _apply_frame(
-                contracts, offers_by_nonce, frame, room, ts_int,
+                contracts, offers_by_id, frame, room, ts_int,
                 result,
             )
         except IdempotentReject:
@@ -504,13 +547,13 @@ def fold_transcript(
                 contract.state = TCLKState.CANCELLED
 
     result.contracts = contracts
-    result.offers = list(offers_by_nonce.values())
+    result.offers = list(offers_by_id.values())
     return result
 
 
 def _apply_frame(
     contracts: dict[str, TCLKContract],
-    offers_by_nonce: dict[str, dict[str, Any]],
+    offers_by_id: dict[str, dict[str, Any]],
     frame: dict[str, Any],
     room: str,
     ts: int,
@@ -520,9 +563,9 @@ def _apply_frame(
     frame_type = frame.get("type")
 
     if frame_type == FrameType.OFFER.value:
-        _apply_offer(contracts, offers_by_nonce, frame, room, ts)
+        _apply_offer(contracts, offers_by_id, frame, room, ts)
     elif frame_type == FrameType.ACCEPT.value:
-        _apply_accept(contracts, offers_by_nonce, frame, room, ts)
+        _apply_accept(contracts, offers_by_id, frame, room, ts)
     elif frame_type == FrameType.LOCK.value:
         _apply_lock(contracts, frame, room, ts)
     elif frame_type == FrameType.REVEAL.value:
@@ -539,7 +582,7 @@ def _apply_frame(
 
 def _apply_offer(
     contracts: dict[str, TCLKContract],
-    offers_by_nonce: dict[str, dict[str, Any]],
+    offers_by_id: dict[str, dict[str, Any]],
     frame: dict[str, Any],
     room: str,
     ts: int,
@@ -557,9 +600,17 @@ def _apply_offer(
     _validate_ms(frame.get("refundAfterMs", 0), "refundAfterMs")
     _validate_ms(frame.get("expiresMs", 0), "expiresMs")
     _validate_nonce(frame.get("nonce", ""))
-    offer_id = frame.get("id", "")
-    if not isinstance(offer_id, str) or not offer_id:
+    offer_id_field = frame.get("id", "")
+    if not isinstance(offer_id_field, str) or not offer_id_field:
         raise TCLKError("offer must have an 'id' field")
+    # Fail-closed id verification (SPEC §3.1): the id must equal the
+    # domain-tagged content hash of the offer without id. A mismatch means
+    # the offer was built by a non-conforming implementation.
+    if offer_id_field != offer_id(frame):
+        raise TCLKError("offer id does not match its canonical content")
+    # Deadline sanity (SPEC §3.1): claimByMs < refundAfterMs strictly.
+    if frame["claimByMs"] >= frame["refundAfterMs"]:
+        raise TCLKError("claimByMs must be strictly less than refundAfterMs")
     # Optional paymentKey
     pk = frame.get("paymentKey")
     if pk is not None:
@@ -572,14 +623,14 @@ def _apply_offer(
     if job is not None and not isinstance(job, dict):
         raise TCLKError("job must be an object")
 
-    nonce = frame["nonce"]
-    if nonce in offers_by_nonce:
-        raise IdempotentReject("duplicate offer nonce")
+    # Replay dedupe by content-addressed id (SPEC §2: replayed frame = no-op).
+    if offer_id_field in offers_by_id:
+        raise IdempotentReject("duplicate offer id")
 
-    offers_by_nonce[nonce] = frame
+    offers_by_id[offer_id_field] = frame
     # Create a preliminary contract entry keyed by offer id
     contract = TCLKContract(
-        contract_id=offer_id,
+        contract_id=offer_id_field,
         state=TCLKState.OFFERED,
         offer=frame,
         lock_kind=frame["lock"],
@@ -593,12 +644,12 @@ def _apply_offer(
         payee_did=frame["from"] if frame.get("role") == "payee" else "",
         last_updated_ms=ts,
     )
-    contracts[offer_id] = contract
+    contracts[offer_id_field] = contract
 
 
 def _apply_accept(
     contracts: dict[str, TCLKContract],
-    offers_by_nonce: dict[str, dict[str, Any]],
+    offers_by_id: dict[str, dict[str, Any]],
     frame: dict[str, Any],
     room: str,
     ts: int,
@@ -617,23 +668,22 @@ def _apply_accept(
     contract_id = frame.get("contract", "")
     _validate_contract_id(contract_id)
 
-    # Verify the accept references a known offer
-    offer = offers_by_nonce.get(ref)
+    # Verify the accept references a known offer (ref = offer id, SPEC §3.2)
+    offer = offers_by_id.get(ref)
     if offer is None:
-        raise TCLKError(f"accept references unknown offer nonce {ref!r}")
+        raise TCLKError(f"accept references unknown offer id {ref!r}")
 
-    # The contract field in accept should reference the offer's id
-    offer_id = offer.get("id", "")
-    if contract_id != offer_id:
-        raise TCLKError("accept contract field does not match offer id")
-
-    # Derive the actual contract id from offer+accept
+    # Recompute the contract id over {offer, accept-core} and require the
+    # frame's contract field to match (SPEC §3.2: both sides recompute; a
+    # mismatch rejects the frame).
     derived = derive_contract_id(offer, frame)
+    if contract_id != derived:
+        raise TCLKError("accept contract id mismatch (recompute failed)")
 
     # Update contract state
-    contract = contracts.get(offer_id)
+    contract = contracts.get(ref)
     if contract is None:
-        raise TCLKError(f"accept references unknown offer id {offer_id!r}")
+        raise TCLKError(f"accept references unknown offer id {ref!r}")
 
     if contract.state != TCLKState.OFFERED:
         raise IdempotentReject("contract already accepted or beyond")
@@ -651,8 +701,8 @@ def _apply_accept(
 
     # Re-key the contract by the derived contract id
     contracts[derived] = contract
-    if offer_id and offer_id != derived:
-        contracts.pop(offer_id, None)
+    if ref != derived:
+        contracts.pop(ref, None)
 
 
 def _apply_lock(
@@ -879,10 +929,6 @@ class TCLKManager:
         self.client.post_message(room, line)
         return nonce
 
-    def _generate_offer_id(self) -> str:
-        """Generate a unique offer id (0x + 64 hex)."""
-        return f"0x{secrets.token_hex(32)}"
-
     # --- Frame builders ---
 
     def post_offer(
@@ -922,12 +968,14 @@ class TCLKManager:
             raise TCLKError("role must be 'payer' or 'payee'")
         _validate_amount(amount)
         _validate_lock_kind(lock)
+        rails = _normalize_rails(rails)
         _validate_rails(rails)
         _validate_ms(claim_by_ms, "claim_by_ms")
         _validate_ms(refund_after_ms, "refund_after_ms")
         _validate_ms(expires_ms, "expires_ms")
+        if claim_by_ms >= refund_after_ms:
+            raise TCLKError("claimByMs must be strictly less than refundAfterMs (SPEC §3.1)")
 
-        offer_id = self._generate_offer_id()
         nonce = str(time.time_ns())
         frame: dict[str, Any] = {
             "type": FrameType.OFFER.value,
@@ -941,16 +989,19 @@ class TCLKManager:
             "refundAfterMs": refund_after_ms,
             "expiresMs": expires_ms,
             "nonce": nonce,
-            "id": offer_id,
         }
         if payment_key is not None:
             frame["paymentKey"] = payment_key
         if job is not None:
             frame["job"] = job
+        # Deterministic, content-addressed offer id (SPEC §3.1) — computed over
+        # the canonical frame fields WITHOUT id, after rails normalization.
+        oid = offer_id(frame)
+        frame["id"] = oid
 
         line = encode_frame(frame)
         self.client.post_message(room, line)
-        return {"nonce": nonce, "id": offer_id}
+        return {"nonce": nonce, "id": oid}
 
     def post_accept(
         self,
@@ -962,9 +1013,10 @@ class TCLKManager:
     ) -> dict[str, str]:
         """Post a signed accept frame referencing an offer.
 
-        The ``contract`` field in the accept references the offer's ``id``.
-        The derived contract id (hash of offer+accept lines) is used for
-        the deal room name and all subsequent frames.
+        Per SPEC.md §3.2 the ``ref`` field carries the offer's ``id`` and the
+        ``contract`` field carries the DERIVED contract id
+        (``sha256("FLOP::tclk::v1|contract|" + canonical {offer, accept-core})``).
+        Both sides recompute the contract id; a mismatch rejects the frame.
 
         Args:
             offer: the full offer frame dict to accept.
@@ -977,22 +1029,25 @@ class TCLKManager:
         """
         if not isinstance(offer, dict) or offer.get("type") != "offer":
             raise TCLKError("offer must be a valid offer frame dict")
+        offer_id_field = offer.get("id", "")
+        if not offer_id_field or offer_id_field != offer_id(offer):
+            raise TCLKError("offer id does not match its canonical content")
         nonce = str(time.time_ns())
-        # The contract field in accept references the offer's id
-        offer_id = offer.get("id", "")
         frame: dict[str, Any] = {
             "type": FrameType.ACCEPT.value,
             "from": self.did,
-            "ref": offer.get("nonce", ""),
+            "ref": offer_id_field,
             "statement": statement,
-            "contract": offer_id,
+            "contract": "",
             "nonce": nonce,
         }
         if payment_key is not None:
             frame["paymentKey"] = payment_key
 
-        # Derive the contract id from the canonical offer+accept lines
+        # The accept core (from, ref, statement, paymentKey?, nonce) is what the
+        # contract id commits to; 'contract' itself is excluded from the core.
         contract_id = derive_contract_id(offer, frame)
+        frame["contract"] = contract_id
         line = encode_frame(frame)
         self.client.post_message(room, line)
         return {"nonce": nonce, "contract": contract_id}

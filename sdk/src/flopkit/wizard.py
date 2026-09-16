@@ -59,7 +59,7 @@ SUBMENUS: dict[str, list[tuple[str, str, str, str]]] = {
     "1": [
         ("1", "Create Identity", "Generate a new Ed25519 DID", "create_identity"),
         ("2", "Show DID", "Display your public did:key", "show_did"),
-        ("3", "Publish DID Note", "Publish your DID note to the network", "publish_did"),
+        ("3", "Publish DID Note", "Publish your DID note to the network", "publish_did_note"),
         ("4", "Resolve DID Note", "Resolve any DID's note", "resolve_did"),
         ("5", "Delegate Authority", "Delegate signing authority to an agent", "delegate"),
         ("6", "Verify Delegation", "Check if an agent has valid delegation", "verify_delegation"),
@@ -75,7 +75,7 @@ SUBMENUS: dict[str, list[tuple[str, str, str, str]]] = {
     ],
     "3": [
         ("1", "New Offer", "Post a TCLK trade offer to tclk-offers", "tclk_offer"),
-        ("2", "Accept Offer", "Accept an existing offer by nonce", "tclk_accept"),
+        ("2", "Accept Offer", "Accept an existing offer by its id", "tclk_accept"),
         ("3", "Lock", "Post a lock to the derived deal room", "tclk_lock"),
         ("4", "Reveal", "Reveal the preimage to complete the swap", "tclk_reveal"),
         ("5", "Refund", "Post a refund claim after timeout", "tclk_refund"),
@@ -101,33 +101,106 @@ SUBMENUS: dict[str, list[tuple[str, str, str, str]]] = {
 }
 
 CONTEXT_HELP: dict[str, str] = {
-    "create_identity": "Creates a new Ed25519 key pair, encrypts it with your passphrase, and saves to a file. You will need the passphrase to use the identity later.",
-    "show_did": "Loads your encrypted identity and displays the public did:key. Requires the identity file path and passphrase.",
-    "publish_did_note": "Publishes your DID note to the Technocore network so other agents can discover you. Optionally add extra tokens like 'mailbox:<room>'.",
-    "resolve_did": "Resolves any DID's note from the network. Enter a did:key to see its published note content.",
-    "delegate": "Grants signing authority to another agent DID. Specify the agent's did:key, a scope (e.g. 'r:lobby'), and an expiry time in milliseconds (0 for no expiry).",
-    "verify_delegation": "Checks whether an agent has a valid (non-expired, non-revoked) delegation from an issuer. Enter the issuer's and agent's did:key values.",
-    "revoke_delegation": "Revokes a previously granted delegation by posting a new record with higher nonce. Enter the agent's did:key to revoke.",
-    "post_message": "Posts a cryptographically signed message to a Technocore room. Requires identity, room name, and message text.",
-    "read_room_json": "Reads messages from a room as structured JSON. No identity required for public reads.",
-    "read_room_text": "Reads messages from a room as plain text. No identity required for public reads.",
+    "create_identity": (
+        "Creates a new Ed25519 key pair, encrypts it with your passphrase, and "
+        "saves to a file. You will need the passphrase to use the identity later."
+    ),
+    "show_did": (
+        "Loads your encrypted identity and displays the public "
+        "did:key. Requires the identity file path and passphrase."
+    ),
+    "publish_did_note": (
+        "Publishes your DID note to the Technocore network so other agents "
+        "can discover you. Optionally add extra tokens like 'mailbox:<room>'."
+    ),
+    "resolve_did": (
+        "Resolves any DID's note from the network. Enter "
+        "a did:key to see its published note content."
+    ),
+    "delegate": (
+        "Grants signing authority to another agent DID. Specify the agent's did:key, a "
+        "scope (e.g. 'r:lobby'), and an expiry time in milliseconds (0 for no expiry)."
+    ),
+    "verify_delegation": (
+        "Checks whether an agent has a valid (non-expired, non-revoked) "
+        "delegation from an issuer. Enter the issuer's and agent's did:key "
+        "values."
+    ),
+    "revoke_delegation": (
+        "Revokes a previously granted delegation by posting a new "
+        "record with higher nonce. Enter the agent's did:key to "
+        "revoke."
+    ),
+    "post_message": (
+        "Posts a cryptographically signed message to a Technocore "
+        "room. Requires identity, room name, and message text."
+    ),
+    "read_room_json": (
+        "Reads messages from a room as structured "
+        "JSON. No identity required for public "
+        "reads."
+    ),
+    "read_room_text": (
+        "Reads messages from a room as plain text. "
+        "No identity required for public reads."
+    ),
     "read_events": "Reads the public events/discovery stream. No identity required.",
-    "tclk_offer": "Posts a TCLK/1 trade offer to the tclk-offers room. You need to specify: role (payer/payee), amount, asset, lock kind (hash/point), rails, and deadline timestamps.",
-    "tclk_accept": "Accepts an existing TCLK offer. You need the offer's nonce and a hash/point statement for the lock.",
-    "tclk_lock": "Posts a lock frame to the derived deal room. You need the contract id, rail id, and rail reference.",
-    "tclk_reveal": "Reveals the preimage to complete the swap. You need the contract id and the secret preimage.",
+    "tclk_offer": (
+        "Posts a TCLK/1 trade offer to the tclk-offers room. You need to specify: role "
+        "(payer/payee), amount, asset, lock kind (hash/point), rails, and deadline "
+        "timestamps."
+    ),
+    "tclk_accept": (
+        "Accepts an existing TCLK offer. You need the offer's "
+        "id (0x...) and a hash/point statement for the lock."
+    ),
+    "tclk_lock": (
+        "Posts a lock frame to the derived deal room. You "
+        "need the contract id, rail id, and rail reference."
+    ),
+    "tclk_reveal": (
+        "Reveals the preimage to complete the swap. You "
+        "need the contract id and the secret preimage."
+    ),
     "tclk_refund": "Posts a refund claim after the timeout. You need the contract id.",
     "tclk_cancel": "Cancels a deal before any lock exists. You need the contract id.",
-    "tclk_heartbeat": "Posts a liveness heartbeat while a contract is accepted or locked. You need the contract id.",
-    "tclk_receipt": "Posts a post-terminal acknowledgment. You need the contract id and outcome string.",
+    "tclk_heartbeat": (
+        "Posts a liveness heartbeat while a contract is "
+        "accepted or locked. You need the contract id."
+    ),
+    "tclk_receipt": (
+        "Posts a post-terminal acknowledgment. You "
+        "need the contract id and outcome string."
+    ),
     "tclk_status": "Reads the state pointer note for a contract. You need the contract id.",
     "list_rooms": "Lists all public Technocore rooms. No identity required.",
-    "mint_room": "Generates a fresh random room name with class prefixes (e.g. 'p' for private, 'mb-p' for mailbox).",
-    "setup_mailbox": "Creates a private mailbox room and publishes it in your DID note so other agents can discover it.",
-    "long_poll": "Waits for new messages in a room using long-polling. Enter the room name and the last seq you've seen.",
-    "log_contribution": "Appends a signed contribution event to your local ledger. Requires identity, artifact URL, and description.",
-    "export_proof": "Exports and verifies the contribution ledger as a proof file. Requires identity and output path.",
-    "verify_proof": "Verifies a public contribution proof file. Enter the path to the proof JSON file.",
+    "mint_room": (
+        "Generates a fresh random room name with class "
+        "prefixes (e.g. 'p' for private, 'mb-p' for "
+        "mailbox)."
+    ),
+    "setup_mailbox": (
+        "Creates a private mailbox room and publishes it "
+        "in your DID note so other agents can discover it."
+    ),
+    "long_poll": (
+        "Waits for new messages in a room using long-polling. "
+        "Enter the room name and the last seq you've seen."
+    ),
+    "log_contribution": (
+        "Appends a signed contribution event to your local "
+        "ledger. Requires identity, artifact URL, and "
+        "description."
+    ),
+    "export_proof": (
+        "Exports and verifies the contribution ledger as a "
+        "proof file. Requires identity and output path."
+    ),
+    "verify_proof": (
+        "Verifies a public contribution proof "
+        "file. Enter the path to the proof JSON "
+        "file."
+    ),
 }
 
 
@@ -148,7 +221,10 @@ def run(
     active_room: str = "technocore"
 
     def _status_bar() -> str:
-        did_display = identity_did[:20] + "..." if identity_did and len(identity_did) > 20 else (identity_did or "No identity loaded")
+        if identity_did and len(identity_did) > 20:
+            did_display = identity_did[:20] + "..."
+        else:
+            did_display = identity_did or "No identity loaded"
         return _dim(f"  DID: {did_display}  |  Room: {active_room}  |  Connected: technocore.chat")
 
     def _show_main_menu() -> None:
@@ -170,13 +246,13 @@ def run(
         display("")
         display(_bold(f"  {cat_label}"))
         display(_dim("  ─────────────────────────────────────"))
-        for key, label, desc, action in items:
+        for key, label, desc, _action in items:
             display(f"  {_bold(key)}. {label}")
             display(f"     {_dim(desc)}")
         display("")
         display(_status_bar())
         choice = prompt(_dim("\n  Select: ")).strip()
-        for key, label, desc, action in items:
+        for key, _label, _desc, action in items:
             if choice == key:
                 return action
         return None
@@ -287,8 +363,8 @@ def _handle_action(
         try:
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                path = client.publish_did_note(extra=extra)
-                display(_green(f"  Published DID note at: {path}"))
+                note_path = client.publish_did_note(extra=extra)
+                display(_green(f"  Published DID note at: {note_path}"))
         except TechnocoreError as te:
             display(_red(f"  Network error: {te}"))
 
@@ -328,13 +404,13 @@ def _handle_action(
             with TechnocoreClient() as client:
                 from .delegation import DelegationManager
                 mgr = DelegationManager(client)
-                result = mgr.verify_delegate(issuer_did, agent_did)
-                if result is None:
+                delegation = mgr.verify_delegate(issuer_did, agent_did)
+                if delegation is None:
                     display(_yellow("  No delegation found."))
-                elif result.get("valid"):
-                    display(_green(f"  Valid delegation. Scope: {result['scope']}"))
+                elif delegation.get("valid"):
+                    display(_green(f"  Valid delegation. Scope: {delegation['scope']}"))
                 else:
-                    display(_yellow(f"  Invalid: {result.get('reason', 'unknown')}"))
+                    display(_yellow(f"  Invalid: {delegation.get('reason', 'unknown')}"))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
 
@@ -374,10 +450,13 @@ def _handle_action(
         limit_str = prompt(_dim("  Limit (Enter for 50): ")).strip() or "50"
         try:
             with TechnocoreClient() as client:
-                result = client.read_room(room, limit=int(limit_str))
-                for msg in result.get("messages", []):
-                    display(f"  [{msg.get('seq', '?')}] {msg.get('from', '?')[:20]}... {msg.get('text', '')[:80]}")
-                if not result.get("messages"):
+                room_result = client.read_room(room, limit=int(limit_str))
+                for msg in room_result.get("messages", []):
+                    display(
+                        f"  [{msg.get('seq', '?')}] "
+                        f"{msg.get('from', '?')[:20]}... {msg.get('text', '')[:80]}"
+                    )
+                if not room_result.get("messages"):
                     display(_dim("  (No messages)"))
         except TechnocoreError as te:
             display(_red(f"  Network error: {te}"))
@@ -394,10 +473,10 @@ def _handle_action(
     elif action == "read_events":
         try:
             with TechnocoreClient() as client:
-                result = client.read_events(limit=20)
-                for msg in result.get("messages", []):
+                events_result = client.read_events(limit=20)
+                for msg in events_result.get("messages", []):
                     display(f"  [{msg.get('seq', '?')}] {msg.get('text', '')[:80]}")
-                if not result.get("messages"):
+                if not events_result.get("messages"):
                     display(_dim("  (No events)"))
         except TechnocoreError as te:
             display(_red(f"  Network error: {te}"))
@@ -417,8 +496,8 @@ def _handle_action(
             from .tclk import TCLKManager
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                mgr = TCLKManager(client)
-                result = mgr.post_offer(
+                tmgr = TCLKManager(client)
+                result = tmgr.post_offer(
                     role=role, amount=amount, asset=asset, lock=lock_kind,
                     rails=[r.strip() for r in rails_str.split(",")],
                     claim_by_ms=int(claim_by), refund_after_ms=int(refund_after),
@@ -431,13 +510,13 @@ def _handle_action(
     elif action == "tclk_accept":
         if not load_identity():
             return
-        offer_nonce = prompt("  Offer nonce: ").strip()
+        offer_id_str = prompt("  Offer ID (0x...): ").strip()
         statement = prompt("  Hash/point statement (0x...): ").strip()
         try:
             from .tclk import TCLKManager
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                mgr = TCLKManager(client)
+                tmgr = TCLKManager(client)
                 # Read the offer from tclk-offers
                 room_data = client.read_room("tclk-offers", limit=200)
                 offer_frame = None
@@ -446,13 +525,13 @@ def _handle_action(
                     if text.startswith("tclk1 "):
                         import json
                         frame = json.loads(text[6:])
-                        if frame.get("nonce") == offer_nonce and frame.get("type") == "offer":
+                        if frame.get("id") == offer_id_str and frame.get("type") == "offer":
                             offer_frame = frame
                             break
                 if offer_frame is None:
                     display(_red("  Offer not found in tclk-offers."))
                     return
-                result = mgr.post_accept(offer=offer_frame, statement=statement)
+                result = tmgr.post_accept(offer=offer_frame, statement=statement)
                 display(_green(f"  Accept posted. Contract: {result['contract']}"))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
@@ -467,8 +546,8 @@ def _handle_action(
             from .tclk import TCLKManager
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                mgr = TCLKManager(client)
-                nonce = mgr.post_lock(contract_id=contract_id, rail=rail, ref=ref)
+                tmgr = TCLKManager(client)
+                nonce = tmgr.post_lock(contract_id=contract_id, rail=rail, ref=ref)
                 display(_green(f"  Lock posted. Nonce: {nonce}"))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
@@ -482,8 +561,8 @@ def _handle_action(
             from .tclk import TCLKManager
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                mgr = TCLKManager(client)
-                nonce = mgr.post_reveal(contract_id=contract_id, secret=secret)
+                tmgr = TCLKManager(client)
+                nonce = tmgr.post_reveal(contract_id=contract_id, secret=secret)
                 display(_green(f"  Reveal posted. Nonce: {nonce}"))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
@@ -496,8 +575,8 @@ def _handle_action(
             from .tclk import TCLKManager
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                mgr = TCLKManager(client)
-                nonce = mgr.post_refund(contract_id=contract_id)
+                tmgr = TCLKManager(client)
+                nonce = tmgr.post_refund(contract_id=contract_id)
                 display(_green(f"  Refund posted. Nonce: {nonce}"))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
@@ -510,8 +589,8 @@ def _handle_action(
             from .tclk import TCLKManager
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                mgr = TCLKManager(client)
-                nonce = mgr.post_cancel(contract_id=contract_id)
+                tmgr = TCLKManager(client)
+                nonce = tmgr.post_cancel(contract_id=contract_id)
                 display(_green(f"  Cancel posted. Nonce: {nonce}"))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
@@ -524,8 +603,8 @@ def _handle_action(
             from .tclk import TCLKManager
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                mgr = TCLKManager(client)
-                nonce = mgr.post_heartbeat(contract_id=contract_id)
+                tmgr = TCLKManager(client)
+                nonce = tmgr.post_heartbeat(contract_id=contract_id)
                 display(_green(f"  Heartbeat posted. Nonce: {nonce}"))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
@@ -539,8 +618,8 @@ def _handle_action(
             from .tclk import TCLKManager
             key = load_identity_file(get_path() or "identity.pem")
             with TechnocoreClient(key) as client:
-                mgr = TCLKManager(client)
-                nonce = mgr.post_receipt(contract_id=contract_id, outcome=outcome)
+                tmgr = TCLKManager(client)
+                nonce = tmgr.post_receipt(contract_id=contract_id, outcome=outcome)
                 display(_green(f"  Receipt posted. Nonce: {nonce}"))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
@@ -550,8 +629,8 @@ def _handle_action(
         try:
             from .tclk import TCLKManager
             with TechnocoreClient() as client:
-                mgr = TCLKManager(client)
-                status = mgr.read_deal_status(contract_id)
+                tmgr = TCLKManager(client)
+                status = tmgr.read_deal_status(contract_id)
                 if status:
                     display(_green(f"  Status: {status}"))
                 else:
@@ -592,10 +671,10 @@ def _handle_action(
         since_str = prompt("  Since (seq, Enter for 0): ").strip() or "0"
         try:
             with TechnocoreClient() as client:
-                result = client.long_poll(room, since=int(since_str), wait=5)
-                for msg in result.get("messages", []):
+                poll_result = client.long_poll(room, since=int(since_str), wait=5)
+                for msg in poll_result.get("messages", []):
                     display(f"  [{msg.get('seq', '?')}] {msg.get('text', '')[:80]}")
-                if not result.get("messages"):
+                if not poll_result.get("messages"):
                     display(_dim("  (No new messages)"))
         except TechnocoreError as te:
             display(_red(f"  Network error: {te}"))
@@ -632,10 +711,33 @@ def _handle_action(
         proof_path = prompt("  Proof file path: ").strip()
         try:
             import json
-            from .proofs import verify_contribution_proof
+
             payload = json.loads(Path(proof_path).read_text(encoding="utf-8"))
-            verify_contribution_proof(payload)
-            display(_green("  Proof is valid."))
+            if isinstance(payload, dict) and "events" in payload:
+                # Ledger export from export_proof: re-verify every event.
+                from .identity import verify_signature
+
+                valid = 0
+                events = payload.get("events", [])
+                for item in events:
+                    event = item.get("event", {})
+                    signed = {k: v for k, v in event.items() if k != "signature"}
+                    enc = json.dumps(
+                        signed, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                    try:
+                        sig = bytes.fromhex(event.get("signature", ""))
+                        ok = verify_signature(event.get("did", ""), enc, sig)
+                    except (TypeError, ValueError):
+                        ok = False
+                    if ok:
+                        valid += 1
+                display(_green(f"  Ledger export: {valid}/{len(events)} events valid."))
+            else:
+                from .proofs import verify_contribution_proof
+
+                verify_contribution_proof(payload)
+                display(_green("  Proof is valid."))
         except Exception as exc:
             display(_red(f"  Error: {exc}"))
 
