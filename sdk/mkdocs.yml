@@ -1,11 +1,12 @@
-site_name: flopkit
-site_description: Secure Technocore SDK and MCP server
+site_name: FlopKit — Secure Python SDK, CLI, Wizard, and MCP Server
+site_description: Secure Python SDK and CLI for Ed25519 DID identities, signed Technocore messaging, TCLK/1 workflows, AI-agent coordination, and verifiable contribution proofs.
 repo_url: https://github.com/0o0r7/flopkit-sdk
 theme:
   name: material
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Interactive Wizard: wizard.md
   - TCLK guide: tclk-guide.md
   - Security: security.md
   - MCP setup: mcp.md

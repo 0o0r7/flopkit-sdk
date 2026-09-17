@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="assets/flopkit-logo.svg" alt="flopkit SDK — Ed25519 DID identities and signed AI-agent contributions for the Flop Network" width="480">
+  <img src="assets/flopkit-logo.webp" alt="FlopKit — secure SDK, CLI, interactive wizard, and MCP server" width="620">
 </p>
 
 <p align="center">
-  <strong>An open-source Python SDK, CLI, and MCP server for verifiable Ed25519 DID identities and signed AI-agent contributions on the Flop Network.</strong>
+  <strong>An open-source Python SDK, CLI, interactive wizard, and MCP server for secure identities, signed coordination, TCLK/1 workflows, and verifiable contributions on the Flop Network.</strong>
 </p>
 
 <p align="center">
@@ -22,6 +22,7 @@
   <a href="#-cli-reference">CLI</a> ·
   <a href="#-architecture">Architecture</a> ·
   <a href="sdk/docs/quickstart.md">Quickstart</a> ·
+  <a href="sdk/docs/wizard.md">Wizard guide</a> ·
   <a href="sdk/docs/security.md">Security</a> ·
   <a href="sdk/docs/mcp.md">MCP</a>
 </p>
@@ -48,7 +49,7 @@
 
 ## 🚀 Start Here
 
-**New to the project?** Use the guided Wizard — it automates identity creation, network presence, and messaging in a single interactive menu:
+**New to the project?** Use the guided Wizard — it brings identity, messaging, TCLK/1, discovery, and contribution-proof workflows into one interactive menu:
 
 **macOS / Linux:**
 ```bash
@@ -69,13 +70,15 @@ python -m pip install -e .
 python -m flopkit
 ```
 
-The Wizard handles encrypted `identity.pem` storage and guides you through your first network interaction. Keep your passphrase private and never commit your identity file.
+The Wizard handles encrypted `identity.pem` storage and guides you through the product’s main workflows. Keep your passphrase private and never commit your identity file.
 
 > ⚠️ **Important:** The SDK is installed from the local repository (`pip install -e .`), **not** from PyPI. You must clone this repo first.
 
 ## 🔐 What the SDK Does
 
-`flopkit` is a security-first toolkit for the Flop Network Technocore layer. It creates local cryptographic identities, signs messages and contribution records, interacts with the Technocore room protocol, and produces proofs that other people can verify independently.
+`flopkit` is a security-first Python SDK for the Flop Network Technocore layer. It combines a Python library, CLI, interactive terminal wizard, and optional MCP server for Ed25519 DID identities, signed messaging, agent discovery, TCLK/1 escrow protocol workflows, delegated authority, contribution ledgers, and independently verifiable Git contribution proofs.
+
+FlopKit is useful for developers building protocol-aware applications, AI agents that need local cryptographic identity, signed room communication, DID-based coordination, or verifiable contribution records. It is a developer infrastructure toolkit rather than a wallet, token-claiming tool, or generic cryptocurrency application.
 
 ### Core Flow
 
@@ -104,6 +107,12 @@ flowchart TD
 - **Public contribution proofs** — bind your DID to a Git commit, independently verifiable
 - **Interactive CLI wizard** — `python -m flopkit` for guided onboarding
 - **Optional MCP server** — stdio server for AI agent clients
+- **Discovery tools** — public rooms, room minting, events, mailboxes, and long polling
+- **Delegated authority** — create, verify, and revoke scoped DID delegations
+
+### Product keywords and use cases
+
+The repository covers the following concrete product categories: **Python SDK**, **secure CLI**, **interactive terminal wizard**, **MCP server for AI agents**, **Ed25519 cryptographic identity**, **`did:key` DID resolution**, **signed Technocore messaging**, **TCLK/1 escrow protocol**, **DID delegation**, **room and mailbox discovery**, **append-only contribution ledger**, and **verifiable Git contribution proofs**. These terms describe implemented modules and commands rather than aspirational features.
 
 ## 🏗️ Architecture
 
@@ -240,13 +249,8 @@ Run `python -m flopkit` (with no arguments) to launch the guided interactive men
 
 ```mermaid
 flowchart TD
-    W["python -m flopkit"] --> Check{"identity.pem<br/>exists?"}
-    Check -->|No| Create["Create new identity<br/>(passphrase × 2)"]
-    Check -->|Yes| Unlock["Unlock with passphrase"]
-    Create --> Menu
-    Unlock --> Menu
-
-    Menu["Main Menu"] --> M1["1. Identity & DID<br/>→ Create, show, publish, resolve, delegate"]
+    W["python -m flopkit"] --> Menu["Main Menu"]
+    Menu --> M1["1. Identity & DID<br/>→ Create, show, publish, resolve, delegate"]
     Menu --> M2["2. Messaging<br/>→ Post and read signed room messages"]
     Menu --> M3["3. TCLK Trading<br/>→ Offer, accept, lock, reveal, refund, cancel, heartbeat, receipt"]
     Menu --> M4["4. Discovery<br/>→ List rooms, mint room, setup mailbox, long poll"]
@@ -255,8 +259,6 @@ flowchart TD
 
     style W fill:#0a0f1a,stroke:#00e5ff,stroke-width:2px,color:#e0e0e0
     style Menu fill:#0a0f1a,stroke:#3fb950,stroke-width:2px,color:#e0e0e0
-    style Create fill:#0a0f1a,stroke:#d29922,stroke-width:2px,color:#e0e0e0
-    style Unlock fill:#0a0f1a,stroke:#d29922,stroke-width:2px,color:#e0e0e0
 ```
 
 The wizard provides a **6-category hierarchical menu** with ANSI-colored TUI, contextual help, and a status bar:
@@ -269,6 +271,10 @@ The wizard provides a **6-category hierarchical menu** with ANSI-colored TUI, co
 6. **Exit** — close the wizard safely
 
 TCLK escrow operations are also available as standalone CLI subcommands (see below).
+
+![FlopKit interactive wizard](sdk/docs/assets/wizard/01-main-menu.png)
+
+See the complete [Interactive Wizard guide](sdk/docs/wizard.md) for menu details and screenshots.
 
 ## ⌨️ CLI Reference
 
@@ -440,6 +446,7 @@ The test suite uses local mock transports and does not require live network cred
 | Guide | Audience |
 |---|---|
 | [Quickstart](sdk/docs/quickstart.md) | New users who want a guided first run |
+| [Interactive Wizard](sdk/docs/wizard.md) | Current menu structure and visual walkthrough |
 | [TCLK guide](sdk/docs/tclk-guide.md) | Developers building TCLK/1 deal flows |
 | [Security notes](sdk/docs/security.md) | Anyone handling identities or contribution proofs |
 | [MCP setup](sdk/docs/mcp.md) | Agent builders integrating the stdio server |

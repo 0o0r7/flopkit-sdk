@@ -1,18 +1,21 @@
-# SDK maintenance guide
+# FlopKit SDK maintenance guide
 
-This repository contains one product: the Python SDK, CLI, and optional MCP server under [`sdk/`](sdk/). All source, tests, and documentation are organized around that product.
+This repository contains one product: the FlopKit Python SDK, CLI, interactive wizard, and optional MCP server under [`sdk/`](sdk/). There is no web frontend or application backend in this repository. The documentation site is the repository preview surface.
 
-## Quick links
+## Documentation map
 
-| Guide | Path |
+| Guide | Purpose |
 |---|---|
-| [Quickstart](sdk/docs/quickstart.md) | New user onboarding |
-| [Security notes](sdk/docs/security.md) | Identity and proof security |
-| [MCP setup](sdk/docs/mcp.md) | Stdio server configuration |
-| [Performance evidence](sdk/docs/evidence.md) | Reproducible validation |
-| [SDK package README](sdk/README.md) | Developer reference inside `sdk/` |
+| [Documentation home](sdk/docs/index.md) | Product overview and navigation |
+| [Quickstart](sdk/docs/quickstart.md) | Installation and first safe workflow |
+| [Interactive Wizard](sdk/docs/wizard.md) | Current menu structure and screenshots |
+| [TCLK guide](sdk/docs/tclk-guide.md) | TCLK/1 deal-flow reference |
+| [Security notes](sdk/docs/security.md) | Identity, passphrase, and proof handling |
+| [MCP setup](sdk/docs/mcp.md) | Local stdio integration for MCP hosts |
+| [Validation evidence](sdk/docs/evidence.md) | Reproducible local test evidence |
+| [Package README](sdk/README.md) | Developer-facing package reference |
 
-## Lightweight runtime install
+## Lightweight runtime installation
 
 From the repository root:
 
@@ -24,20 +27,22 @@ python -m pip install -e .
 flopkit --help
 ```
 
-This installs only the runtime dependencies needed by the SDK and CLI (`cryptography` and `httpx`).
+The runtime installation contains the dependencies required by the SDK and CLI. MCP, tests, linting, type checking, and documentation tooling are optional extras.
 
-## Optional MCP install
+## Optional MCP installation
 
-Install MCP support only when a local MCP server is required:
+Install MCP support only when an MCP host needs to launch the local server:
 
 ```bash
 python -m pip install -e '.[mcp]'
 python -m flopkit.mcp_server
 ```
 
-## Full development checks
+See [MCP setup](sdk/docs/mcp.md) for the required process environment.
 
-Contributors can install the complete quality toolchain:
+## Full quality gate
+
+From `sdk/`, install the contributor extra and run:
 
 ```bash
 python -m pip install -e '.[dev]'
@@ -47,25 +52,36 @@ pytest --cov --cov-fail-under=90
 mkdocs build --strict
 ```
 
-## Design constraints
+The tests use local mock transports. A live Technocore endpoint is not required for the local quality gate.
 
-Keep runtime dependencies separate from contributor tooling. Do not add secrets, identity files, passphrases, seed phrases, or generated runtime ledgers to the repository. Protocol changes must include mock-transport tests and preserve the rule that ambiguous signed writes are not retried automatically.
+## Current product surfaces
 
-## CLI subcommands
+The interactive wizard in `sdk/src/flopkit/wizard.py` is the authoritative source for the guided user flow. It currently exposes six top-level areas:
 
-The `flopkit` CLI exposes the following subcommands. TCLK escrow operations are available through the interactive wizard (`python -m flopkit` → option 4), not as standalone CLI subcommands.
+1. **Identity & DID** — encrypted Ed25519 identity creation, DID display, DID-note publication and resolution, delegation, verification, and revocation.
+2. **Messaging** — signed room messages, JSON and text reads, and public event reads.
+3. **TCLK Trading** — offer, accept, lock, reveal, refund, cancel, heartbeat, receipt, and deal-status operations.
+4. **Discovery** — room listing, room minting, mailbox setup, and long polling.
+5. **Contributions** — signed contribution logging, proof export, and proof verification.
+6. **Exit** — safe wizard shutdown.
 
-| Subcommand | Purpose |
-|---|---|
-| `generate-identity` | Create an encrypted Ed25519 identity |
-| `say` / `post` | Post a signed message to a Technocore room |
-| `read` | Read public messages from a Technocore room |
-| `rooms` | List public Technocore rooms (no identity needed) |
-| `log` | Append a signed contribution event to the local ledger |
-| `export-proof` | Export and verify the contribution ledger |
-| `proof` | Create a signed proof for a public Git contribution |
-| `verify-proof` | Verify a public contribution proof |
-| `note-read` | Read a Technocore note value |
-| `note-write` | Write a Technocore note value (supports compare-and-set) |
-| `did-publish` | Publish this identity's DID note |
-| `did-resolve` | Resolve a DID note without an identity |
+The standalone CLI in `sdk/src/flopkit/cli.py` additionally exposes notes, public proofs, TCLK operations, delegation commands, events, and room minting. See the [package reference](sdk/README.md) and the [wizard guide](sdk/docs/wizard.md) when changing either surface.
+
+## Architecture contract
+
+The repository should continue to preserve these boundaries:
+
+- Runtime dependencies remain separate from contributor tooling.
+- Private keys remain in passphrase-encrypted identity files.
+- Existing identity paths are never silently overwritten.
+- Signed writes use protocol nonces and are not automatically retried after ambiguous timeouts.
+- Protocol changes include mock-transport tests.
+- Documentation claims about commands and wizard menus are checked against `wizard.py`, `cli.py`, and `pyproject.toml` before release.
+
+## Documentation maintenance rules
+
+When a user-facing capability changes, update the source and documentation in the same change. At minimum, review the root README, `sdk/README.md`, `sdk/docs/quickstart.md`, `sdk/docs/wizard.md`, and `sdk/docs/evidence.md`.
+
+Use the supplied logo at `sdk/docs/assets/flopkit-monochrome.webp` for documentation pages and preserve the repository’s visual language: dark navy surfaces, cyan technical accents, emerald verification accents, restrained amber highlights, concise headings, and readable command blocks.
+
+Do not add identity files, passphrases, tokens, generated ledgers, or live network output to the repository. Screenshots must use disposable identities or redacted public data.
